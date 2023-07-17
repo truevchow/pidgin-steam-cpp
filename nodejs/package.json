@@ -1,0 +1,22 @@
+{
+  "name": "nodejs",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "tsc && node dist/basic_chat.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "trace": "tsc --traceResolution"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "steam-session": "^1.2.4",
+    "steam-user": "^4.28.9"
+  },
+  "devDependencies": {
+    "@types/node": "^20.4.2",
+    "@types/steam-user": "^4.26.4"
+  }
+}
