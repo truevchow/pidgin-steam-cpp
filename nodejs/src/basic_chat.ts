@@ -2,9 +2,10 @@
 
 // var SteamUser = require('steam-user');
 import SteamUser from 'steam-user';
+// import SteamChatRoomClient from 'steam-user/components/chatroom';
 // import {EAccountType, EPersonaState, SteamID} from 'steamid';
+import SteamID from 'steamid';
 import { EAuthSessionGuardType, EAuthTokenPlatformType, LoginSession } from 'steam-session';
-
 
 import * as readline from 'readline';
 import * as crypto from 'crypto';
@@ -39,7 +40,7 @@ class SteamLoginData {
 	}
 }
 
-function genericPrompt(prompt: string, knownValue?: string) {
+function genericPrompt(prompt: string, knownValue?: string, prefix: boolean = true) {
 	const rl = readline.createInterface({
 		input: process.stdin,
 		output: process.stderr
@@ -51,7 +52,10 @@ function genericPrompt(prompt: string, knownValue?: string) {
 			rl.close();
 			resolve(knownValue);
 		} else {
-			rl.question(`Enter your ${prompt}: `, (value) => {
+			if (prefix) {
+				prompt = `Enter your ${prompt}: `;
+			}
+			rl.question(prompt, (value) => {
 				rl.close();
 				resolve(value || '');
 			});
@@ -355,6 +359,13 @@ let friendPersonasLoadPromise = new Promise<void>(r => {
 (async () => await friendPersonasLoadPromise)();
 
 
+function getUser(target: string | SteamID): SteamClientUser | undefined {
+	if (target instanceof SteamID) {
+		target = target.getSteamID64();
+	}
+	return client.users[target];
+}
+
 const sleep = (ms: number | undefined) => new Promise(r => setTimeout(r, ms));
 
 // Send a chat message to a user
@@ -369,10 +380,10 @@ function sendMessageWithDelay(target: string, message: string, delay: number) {
 	}, delay);
 }
 
-function getChatHistory(target: string) {
-	console.log("Getting chat history for friend", target, (<SteamClientUser | undefined>client.users[target])?.player_name);
+function getChatHistoryVerbose(target: string) {
+	console.log("Getting chat history for friend", target, getUser(target)?.player_name);
 	client.chat.getFriendMessageHistory(target, {
-		startTime: Date.now() - 1000 * 60 * 60 * 24 * 7, // 1 day ago
+		startTime: Date.now() - 1000 * 60 * 60 * 24 * 1, // 1 day ago
 	}).then(({ messages, more_available }) => {
 		console.log("Chat history:", messages);
 		console.log("More available:", more_available);
@@ -414,23 +425,61 @@ client.on('webSession', function (sessionID, cookies) {
 		var friends = client.myFriends;
 		console.log("We have " + Object.keys(friends).length + " friends");
 		Object.entries(friends).forEach(function ([steamID, relationship]) {
-			console.log(` - ${steamID}: ${JSON.stringify((<SteamClientUser | undefined>client.users[steamID])?.player_name)} ${relationship}`);
+			console.log(` - ${steamID}: ${JSON.stringify(getUser(steamID)?.player_name)} ${relationship}`);
 		});
 
 		const target: string = process.env.STEAM_TARGET!;
 		if (!target) {
 			console.log("No target specified");
-		} else {
-			console.log(await client.chat.getActiveFriendMessageSessions())
-
-			// SteamChatRoomClient#friendMessage
-			client.chat.on('friendMessage', (message) => {
-				console.log(`friendMessage ${message.steamid_friend} ${message.message_bbcode_parsed}`);
-			});
-
-			getChatHistory(target);
+			return;
 		}
-		// client.logOff();
+
+		let activeSessions = await client.chat.getActiveFriendMessageSessions();
+		console.debug(activeSessions);
+
+		let friendSessions: Record<string, any> = {}
+		for (let session of activeSessions.sessions) {
+			friendSessions[session.steamid_friend] = session;
+			console.log(`Session with ${getUser(session.steamid_friend)?.player_name} ${session.steamid_friend.getSteam3RenderedID()}: ${session.unread_message_count} unread messages, last message ${session.time_last_message}`);
+		}
+
+		// SteamChatRoomClient#friendMessage
+		function formatMessage(message): string {
+			return `[${message.server_timestamp}] ${getUser(message.sender || message.steamid_friend)?.player_name}: ${message.message_bbcode_parsed}`;
+		} 
+		client.chat.on('friendMessage', (message) => {
+			console.log(formatMessage(message));
+		});
+
+		// getChatHistoryVerbose(target);
+		const session = friendSessions[target];
+		console.log("Getting chat history for friend", target, getUser(target)?.player_name);
+		await (client.chat.getFriendMessageHistory(target, {
+			startTime: (session?.time_last_message || Date.now()) - 1000 * 60 * 60 * 24 * 1, // 1 day ago
+			maxCount: 50,
+		}).then(({ messages, more_available }) => {
+			// console.log("Chat history:", messages);
+			// console.log("More available:", more_available);
+			messages.sort((a, b) => Number(a.server_timestamp) - Number(b.server_timestamp));
+			for (let message of messages) {
+				console.log(formatMessage(message));
+			}
+		}).catch((err) => {
+			console.log("Error getting chat history:", err);
+			return;
+		}))
+
+		// Wait for user input from stdin
+		while (true) {
+			const input = await genericPrompt('> ', undefined, false);
+			if (input === '/exit') {
+				break;
+			}
+			sendMessageWithDelay(target, input, 0);
+		}
+
+		console.log("Done, logging off");
+		client.logOff();
 	})();
 });
 
