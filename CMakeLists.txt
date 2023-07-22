@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.26)
 project(pidgin_steam)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 #add_compile_options(-DUSE_OPENSSL_CRYPTO=1)
 # add_compile_options(-I/usr/include/glib-2.0 -I/usr/lib/glib-2.0/include -I/usr/include/sysprof-4 -pthread -lglib-2.0
 #        -I/usr/include/libpurple)
