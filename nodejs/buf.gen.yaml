@@ -1,0 +1,17 @@
+# /proto/buf.gen.yaml
+# version: v1beta
+version: v1
+plugins:
+  # - name: js
+  #   out: protobufs/comm_protobufs
+  #   opt: import_style=commonjs,binary
+  # - name: grpc
+  #   out: protobufs/comm_protobufs
+  #   opt: grpc_js
+  #   path: grpc_tools_node_protoc_plugin
+  - name: ts
+    out: src/protobufs/comm_protobufs
+    opt: grpc_js
+  # - plugin: es
+  #   opt: target=ts
+  #   out: src/protobufs/comm_protobufs

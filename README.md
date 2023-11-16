@@ -7,9 +7,16 @@
 * Protobufs:
     * [Protobuf tutorial for Python](https://protobuf.dev/getting-started/pythontutorial/)
     * https://dev.to/techschoolguru/protocol-buffer-deep-dive-52d9
+	* [Protobuf for TypeScript](https://dev.to/devaddict/use-grpc-with-node-js-and-typescript-3c58)
 * Steam
     * **[Node.js implementation of Steam client](https://github.com/DoctorMcKay/node-steam-user)**
 
+
+## Build
+
+```
+buf generate
+```
 
 ## Notes
 

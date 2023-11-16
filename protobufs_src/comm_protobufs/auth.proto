@@ -1,0 +1,32 @@
+syntax = "proto3";
+package steam;
+
+// TODO: use JWT to secure gRPC communication
+
+// Authentication Service
+service AuthService {
+    rpc Authenticate(AuthRequest) returns (AuthResponse);
+}
+
+// Polling Service
+// service PollService {
+//     rpc PollMessages(PollRequest) returns (stream PollResponse);
+// }
+
+message AuthRequest {
+    string username = 1;
+    string password = 2;
+    string steam_guard_code = 3;
+}
+
+message AuthResponse {
+    bool success = 1;
+}
+
+// message PollRequest {
+//     string username = 1;
+// }
+
+// message PollResponse {
+//     string message = 1;
+// }
