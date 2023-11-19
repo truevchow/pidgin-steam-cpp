@@ -1,10 +1,16 @@
+/*
 import net from 'net';
 import { Buffer } from 'buffer';
 import protobuf from 'protobufjs';
 import fs from 'fs';
-// import { AuthRequest, AuthResponse } from './protobufs/comm_protobufs/auth_pb'
-// import { AuthServiceService } from './protobufs/comm_protobufs/auth_grpc_pb'
-
+*/
+import grpc from '@grpc/grpc-js';
+import { loadSync } from '@grpc/proto-loader';
+import { promisify } from 'util';
+import net from 'net';
+import { Buffer } from 'buffer';
+// import protobuf from 'protobufjs';
+import fs from 'fs';
 
 enum State {
     USERNAME,
@@ -25,11 +31,6 @@ enum ProtocolHeader {
 
 const STEAM_AUTH_SOCK = '/tmp/steam_auth.sock';
 
-// Load the protobuf schema
-const root = protobuf.loadSync('../protobufs_src/comm_protobufs/auth.proto').root;
-const AuthRequest = root.lookupType('steam.AuthRequest');
-const AuthResponse = root.lookupType('steam.AuthResponse');
-
 // Clean up socket if it exists
 const cleanup = () => {
     if (fs.existsSync(STEAM_AUTH_SOCK)) {
@@ -39,6 +40,12 @@ const cleanup = () => {
 };
 
 cleanup();
+
+/*
+// Load the protobuf schema
+const root = protobuf.loadSync('../protobufs_src/comm_protobufs/auth.proto').root;
+const AuthRequest = root.lookupType('steam.AuthRequest');
+const AuthResponse = root.lookupType('steam.AuthResponse');
 
 const server = net.createServer(async (socket) => {
     // Send a request for the username to the client
@@ -91,16 +98,60 @@ const server = net.createServer(async (socket) => {
 server.listen(STEAM_AUTH_SOCK, () => {
     console.log('Server listening on /tmp/steam_auth.sock');
 });
+*/
 
 
+import { AuthServiceService } from './protobufs/comm_protobufs/auth_grpc_pb';
+
+// const PROTO_PATH = '../protobufs_src/comm_protobufs/auth.proto';
+// const packageDefinition = loadSync(PROTO_PATH);
+// const authProto = grpc.loadPackageDefinition(packageDefinition).steam;
+
+const server = new grpc.Server();
+
+server.addService(AuthServiceService, {
+    authenticate: async (call) => {
+        const { username, password, steamGuardCode } = call.request;
+
+        console.log('Username:', username);
+        console.log('Password:', password);
+        console.log('Steam Guard code:', steamGuardCode);
+
+        if (steamGuardCode === '123456') {
+            return { success: true };
+        } else {
+            return { success: false };
+        }
+    },
+});
+
+const bindAsync = promisify(server.bindAsync).bind(server);
+const startAsync = promisify(server.start).bind(server);
+
+(async () => {
+    await bindAsync('/tmp/steam_auth.sock', grpc.ServerCredentials.createInsecure());
+    console.log('Server listening on /tmp/steam_auth.sock');
+    await startAsync();
+});
+
+
+// Cleanup the socket file on exit
+process.on('exit', cleanup);
+
+process.on('SIGINT', () => {
+    cleanup();
+    process.exit(0);
+});
+
+/*
 // Mock client
 const client = net.createConnection(STEAM_AUTH_SOCK, () => {
-  console.log('Client connected to server');
+console.log('Client connected to server');
 
-  // Send a username request to the server
-  const request = AuthRequest.create({ username: 'testuser', password: 'testpass', steamGuardCode: '' });
-  const buffer = AuthRequest.encode(request).finish();
-  client.write(Buffer.concat([Buffer.from([ProtocolHeader.USERNAME_REQUEST]), buffer]));
+// Send a username request to the server
+const request = AuthRequest.create({ username: 'testuser', password: 'testpass', steamGuardCode: '' });
+const buffer = AuthRequest.encode(request).finish();
+client.write(Buffer.concat([Buffer.from([ProtocolHeader.USERNAME_REQUEST]), buffer]));
 });
 
 client.on('data', (data) => {
@@ -129,13 +180,6 @@ client.on('data', (data) => {
 });
 
 client.on('end', () => {
-  console.log('Client disconnected from server');
+    console.log('Client disconnected from server');
 });
-
-// Cleanup the socket file on exit
-process.on('exit', cleanup);
-
-process.on('SIGINT', () => {
-    cleanup();
-    process.exit(0);
-});
+*/

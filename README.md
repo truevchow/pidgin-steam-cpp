@@ -18,6 +18,52 @@
 buf generate
 ```
 
+### Protobuf
+
+protoc tooling really sucks
+it's even worse for TypeScript
+
+fix: https://github.com/blokur/grpc-ts-demo/blob/master/tsconfig.json
+to allow JS files to be copied over:
+```
+    "allowJs": true,
+    "sourceMap": true,
+```
+
+generate JS directly (not what we want):
+```
+~/.../pidgin-steam/nodejs >>> grpc_tools_node_protoc --js_out=import_style=commonjs,binary:../protobufs/comm_protobufs  --grpc_out=../protobufs/comm_protobufs --plugin=protoc-gen-grpc=`which grpc_tools_node_protoc_plugin` -I="../protobufs_src/comm_protobufs" ../protobufs_src/comm_protobufs/*.proto
+```
+
+generate only `.js` and `.d.ts` (but not `.ts`):
+```
+protoc \
+-I=../protobufs_src/comm_protobufs \
+--plugin=protoc-gen-ts=./node_modules/.bin/protoc-gen-ts \
+--plugin=protoc-gen-grpc=./node_modules/grpc-tools/bin/grpc_node_plugin \
+--js_out=import_style=commonjs,binary:../protobufs/comm_protobufs \
+--grpc_out=../protobufs/comm_protobufs \
+--ts_out=service=grpc-node:../protobufs/comm_protobufs \
+../protobufs_src/comm_protobufs/*.proto
+```
+
+broken plugin: `grpc_tools_node_protoc`
+```
+--plugin=protoc-gen-grpc=./node_modules/.bin/grpc_tools_node_protoc \
+```
+https://medium.com/cloud-native-daily/building-high-performance-microservices-with-node-js-grpc-and-typescript-ddef5e0bdb95
+
+works, but generates grpc-web instead of grpc-node: `grpc_node_plugin`
+```
+--plugin=protoc-gen-grpc=./node_modules/grpc-tools/bin/grpc_node_plugin \
+```
+
+### protobuf-es
+
+https://github.com/bufbuild/protobuf-es
+
+doesn't generate files for service
+
 ## Notes
 
 ### C++

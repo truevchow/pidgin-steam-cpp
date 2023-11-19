@@ -3,15 +3,16 @@
 version: v1
 plugins:
   # - name: js
-  #   out: protobufs/comm_protobufs
+  #   out: src/protobufs/comm_protobufs
   #   opt: import_style=commonjs,binary
   # - name: grpc
-  #   out: protobufs/comm_protobufs
+  #   out: src/protobufs/comm_protobufs
   #   opt: grpc_js
   #   path: grpc_tools_node_protoc_plugin
-  - name: ts
-    out: src/protobufs/comm_protobufs
-    opt: grpc_js
-  # - plugin: es
-  #   opt: target=ts
+  # - name: ts
   #   out: src/protobufs/comm_protobufs
+  #   opt: grpc_js
+  - plugin: es
+    path: ./node_modules/.bin/protoc-gen-es
+    opt: target=ts
+    out: src/protobufs/comm_protobufs
