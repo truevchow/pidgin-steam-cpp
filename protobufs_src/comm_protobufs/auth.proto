@@ -1,6 +1,6 @@
 syntax = "proto3";
+// import "google/protobuf/descriptor.proto";
 package steam;
-
 // TODO: use JWT to secure gRPC communication
 
 // Authentication Service
@@ -16,11 +16,25 @@ service AuthService {
 message AuthRequest {
     string username = 1;
     string password = 2;
-    string steam_guard_code = 3;
+    optional string steamGuardCode = 3;
+    optional string sessionKey = 4;  // identifies session for e.g. Steam Guard token
+}
+
+enum AuthState {
+    SUCCESS = 0;
+    INVALID_CREDENTIALS = 1;
+    STEAM_GUARD_CODE_REQUEST = 2;
 }
 
 message AuthResponse {
     bool success = 1;
+    AuthState reason = 2;
+    string sessionKey = 3;  // identifies session for e.g. Steam Guard token
+    string reasonStr = 4;
+    // AuthState reason = 3 [json_name = "reason"];
+    // option (google.protobuf.json_format.field_options) = {
+    //     json_name: "reason"
+    // };
 }
 
 // message PollRequest {
