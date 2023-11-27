@@ -226,7 +226,7 @@ reader.loadLoginData().then(async (loginData) => {
 			console.debug("polling")
 			var steamGuardMachineToken = await genericPrompt('Steam Guard machine token');
 			console.log(`Submitting Steam Guard machine token: ${steamGuardMachineToken}`);
-			session.submitSteamGuardCode(steamGuardMachineToken);
+			await session.submitSteamGuardCode(steamGuardMachineToken);
 		});
 
 		session.on('authenticated', async () => {
@@ -281,7 +281,7 @@ reader.loadLoginData().then(async (loginData) => {
 					switch (type) {
 						case EAuthSessionGuardType.EmailCode:
 							console.log(`A login code has been sent to your email address at ${detail}`);
-							code = await genericPrompt('Code: ');
+							code = await genericPrompt('Code');
 							if (code) {
 								await session.submitSteamGuardCode(code);
 							}
@@ -289,7 +289,7 @@ reader.loadLoginData().then(async (loginData) => {
 
 						case EAuthSessionGuardType.DeviceCode:
 							console.log('You may confirm this login by providing a Steam Guard Mobile Authenticator code');
-							code = await genericPrompt('Code: ');
+							code = await genericPrompt('Code');
 							if (code) {
 								await session.submitSteamGuardCode(code);
 							}
