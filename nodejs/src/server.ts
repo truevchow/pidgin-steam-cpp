@@ -1,8 +1,3 @@
-import { promisify } from 'util';
-import net from 'net';
-import { Buffer } from 'buffer';
-import fs from 'fs';
-
 import { ConnectRouter } from "@connectrpc/connect";
 import { AuthService } from './protobufs/comm_protobufs/auth_connect'
 import { AuthState, AuthResponse } from './protobufs/comm_protobufs/auth_pb'
@@ -13,9 +8,6 @@ import SteamUser from 'steam-user';
 // import SteamChatRoomClient from 'steam-user/components/chatroom';
 // import {EAccountType, EPersonaState, SteamID} from 'steamid';
 import SteamID from 'steamid';
-import { EAuthSessionGuardType, EAuthTokenPlatformType, LoginSession } from 'steam-session';
-import { StartSessionResponse, StartSessionResponseValidAction, } from 'steam-session/dist/interfaces-external';
-
 
 interface SteamClientUser {
     rich_presence: any[];
@@ -31,18 +23,6 @@ interface SteamClientUser {
     avatar_url_medium: string;
     avatar_url_full: string;
 };
-
-class SteamLoginData {
-    accessToken: string;
-    refreshToken: string;
-    webCookies: string[];
-
-    constructor(accessToken: string, refreshToken: string, webCookies: string[]) {
-        this.accessToken = accessToken;
-        this.refreshToken = refreshToken;
-        this.webCookies = webCookies;
-    }
-}
 
 class SessionWrapper {
     client: SteamUser;
@@ -68,103 +48,6 @@ function authRoute(router: ConnectRouter) {
             let sessionKey: string;
             let wrapper: SessionWrapper;
             let isNew: boolean;
-
-            // Print all sessions
-            console.log("Active clients:");
-            activeSessions.forEach((wrapper, sessionKey) => {
-                console.log(sessionKey, wrapper.client.accountInfo);
-            });
-
-            if (call.sessionKey && activeSessions.has(call.sessionKey!)) {
-                isNew = false;
-                console.log("Use existing client")
-                sessionKey = call.sessionKey!;
-                wrapper = activeSessions.get(call.sessionKey!)!;
-
-                // return new AuthResponse({
-                //     success: true,
-                //     reasonStr: AuthState.SUCCESS.toString(),
-                //     reason: AuthState.SUCCESS,
-                //     sessionKey: sessionKey,
-                // });
-            } else {
-                isNew = true;
-                console.log("Create new client")
-                sessionKey = crypto.randomUUID();
-                wrapper = new SessionWrapper(new SteamUser(), !call.refreshToken);
-                activeSessions.set(sessionKey, wrapper);
-
-                let client = wrapper.client;
-
-                // return new AuthResponse({
-                //     success: true,
-                //     reasonStr: AuthState.STEAM_GUARD_CODE_REQUEST.toString(),
-                //     reason: AuthState.STEAM_GUARD_CODE_REQUEST,
-                //     sessionKey: sessionKey,
-                // });
-
-                client.on('steamGuard', function (domain, callback) {
-                    console.log("Steam Guard callback");
-                    wrapper.steamGuardCallback = callback;
-                    requestSteamGuardCode();
-                });
-
-                function succeedOnLogin() {
-                    if (!wrapper.resolve) {
-                        return;
-                    }
-                    if (wrapper.loggedOnDetails && (!wrapper.expectRefreshToken || wrapper.refreshToken)) {
-                        succeed(wrapper.refreshToken);
-                    }
-                }
-
-                client.on('loggedOn', function (details) {
-                    console.log("client: Logged into Steam as " + client.steamID?.getSteam3RenderedID());
-                    client.setPersona(SteamUser.EPersonaState.Online);  // needed to update {@link client.users}
-                    wrapper.loggedOnDetails = details;
-                    succeedOnLogin();
-                });
-
-                // manually patch index.d.ts to add these events:
-                /*
-                    refreshToken: [token: string];
-                    friendPersonasLoaded: [];
-                */
-                client.on('refreshToken', function (refreshToken: string) {
-                    console.log("client: Refresh token");
-                    wrapper.refreshToken = refreshToken;
-                    succeedOnLogin();
-                });
-
-                client.on('error', function (err) {
-                    // This should ordinarily not happen. This only happens in case there's some kind of unexpected error while
-                    // polling, e.g. the network connection goes down or Steam chokes on something.
-                    console.log(`ERROR: This login attempt has failed! ${err.message}`);
-                    fail();
-                    // client.logOff();
-                });
-
-                // client.on('timeout', () => {
-                //     console.log('This login attempt has timed out.');
-                //     fail();
-                // });
-
-                // TODO: allow multiple Steam Guard auth attempts
-                // TODO: maybe allow multiple login attempts?
-                console.log('client: Logging on to Steam');
-                if (call.refreshToken) {
-                    console.log("Using provided refresh token:", call.refreshToken)
-                    client.logOn({
-                        refreshToken: call.refreshToken,
-                    });
-                } else {
-                    console.log("Using provided username and password")
-                    client.logOn({
-                        accountName: call.username,
-                        password: call.password,
-                    });
-                }
-            }
 
             function requestSteamGuardCode() {
                 let resolve = wrapper.resolve!;
@@ -197,6 +80,84 @@ function authRoute(router: ConnectRouter) {
                 }));
             }
 
+            // Print all sessions
+            console.log("Active clients:");
+            activeSessions.forEach((wrapper, sessionKey) => {
+                console.log(sessionKey, wrapper.client.accountInfo);
+            });
+
+            if (call.sessionKey && activeSessions.has(call.sessionKey!)) {
+                isNew = false;
+                console.log("Use existing client")
+                sessionKey = call.sessionKey!;
+                wrapper = activeSessions.get(call.sessionKey!)!;
+            } else {
+                isNew = true;
+                console.log("Create new client")
+                sessionKey = crypto.randomUUID();
+                wrapper = new SessionWrapper(new SteamUser(), !call.refreshToken);
+                activeSessions.set(sessionKey, wrapper);
+
+                let client = wrapper.client;
+
+                client.on('steamGuard', function (domain, callback) {
+                    console.log("Steam Guard callback");
+                    wrapper.steamGuardCallback = callback;
+                    requestSteamGuardCode();
+                });
+
+                function succeedOnLogin() {
+                    if (!wrapper.resolve) {
+                        return;
+                    }
+                    if (wrapper.loggedOnDetails && (!wrapper.expectRefreshToken || wrapper.refreshToken)) {
+                        succeed(wrapper.refreshToken);
+                    }
+                }
+
+                client.on('loggedOn', function (details) {
+                    console.log("client: Logged into Steam as " + client.steamID?.getSteam3RenderedID());
+                    client.setPersona(SteamUser.EPersonaState.Online);  // needed to update {@link client.users}
+                    wrapper.loggedOnDetails = details;
+                    succeedOnLogin();
+                });
+
+                // NOTE: manually patch steam-user/index.d.ts to add these events:
+                /*
+                    refreshToken: [token: string];
+                    friendPersonasLoaded: [];
+                */
+                client.on('refreshToken', function (refreshToken: string) {
+                    console.log("client: Refresh token");
+                    wrapper.refreshToken = refreshToken;
+                    succeedOnLogin();
+                });
+
+                client.on('error', function (err) {
+                    // This should ordinarily not happen. This only happens in case there's some kind of unexpected error while
+                    // polling, e.g. the network connection goes down or Steam chokes on something.
+                    console.log(`ERROR: This login attempt has failed! ${err.message}`);
+                    fail();
+                    // client.logOff();
+                });
+
+                // TODO: allow multiple Steam Guard auth attempts
+                // TODO: maybe allow multiple login attempts?
+                console.log('client: Logging on to Steam');
+                if (call.refreshToken) {
+                    console.log("Using provided refresh token:", call.refreshToken)
+                    client.logOn({
+                        refreshToken: call.refreshToken,
+                    });
+                } else {
+                    console.log("Using provided username and password")
+                    client.logOn({
+                        accountName: call.username,
+                        password: call.password,
+                    });
+                }
+            }
+
             console.log("Session key", sessionKey);
             return new Promise<AuthResponse>(async (resolve) => {
                 wrapper.resolve = resolve;
@@ -208,7 +169,7 @@ function authRoute(router: ConnectRouter) {
                 if (call.steamGuardCode) {
                     console.log("Using provided Steam Guard code:", call.steamGuardCode)
                     try {
-                        var callback = wrapper.steamGuardCallback!;
+                        let callback = wrapper.steamGuardCallback!;
                         wrapper.steamGuardCallback = undefined;
                         callback!(call.steamGuardCode!);
                     } catch (ex: any) {
