@@ -18,6 +18,7 @@ message AuthRequest {
     string password = 2;
     optional string steamGuardCode = 3;
     optional string sessionKey = 4;  // identifies session for e.g. Steam Guard token
+    optional string refreshToken = 5;  // preferred to username/password
 }
 
 enum AuthState {
@@ -31,6 +32,7 @@ message AuthResponse {
     AuthState reason = 2;
     string sessionKey = 3;  // identifies session for e.g. Steam Guard token
     string reasonStr = 4;
+    optional string refreshToken = 5;
     // AuthState reason = 3 [json_name = "reason"];
     // option (google.protobuf.json_format.field_options) = {
     //     json_name: "reason"

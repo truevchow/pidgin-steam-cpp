@@ -46,12 +46,16 @@ class SteamLoginData {
 
 class SessionWrapper {
     client: SteamUser;
-    session: LoginSession;
+    steamGuardCallback: undefined | ((code: string) => void);
     resolve: undefined | ((value: AuthResponse) => void);
 
-    constructor(client: SteamUser, session: LoginSession) {
+    expectRefreshToken: boolean;
+    refreshToken: undefined | string;
+    loggedOnDetails: undefined | any;
+
+    constructor(client: SteamUser, expectRefreshToken: boolean) {
         this.client = client;
-        this.session = session;
+        this.expectRefreshToken = expectRefreshToken;
     }
 }
 
@@ -66,14 +70,14 @@ function authRoute(router: ConnectRouter) {
             let isNew: boolean;
 
             // Print all sessions
-            console.log("Active sessions:");
+            console.log("Active clients:");
             activeSessions.forEach((wrapper, sessionKey) => {
-                console.log(sessionKey, wrapper.session.accountName);
+                console.log(sessionKey, wrapper.client.accountInfo);
             });
 
             if (call.sessionKey && activeSessions.has(call.sessionKey!)) {
                 isNew = false;
-                console.log("Use existing session")
+                console.log("Use existing client")
                 sessionKey = call.sessionKey!;
                 wrapper = activeSessions.get(call.sessionKey!)!;
 
@@ -85,11 +89,13 @@ function authRoute(router: ConnectRouter) {
                 // });
             } else {
                 isNew = true;
-                console.log("Create new session")
+                console.log("Create new client")
                 sessionKey = crypto.randomUUID();
-                wrapper = new SessionWrapper(new SteamUser(), new LoginSession(EAuthTokenPlatformType.WebBrowser));
+                wrapper = new SessionWrapper(new SteamUser(), !call.refreshToken);
                 activeSessions.set(sessionKey, wrapper);
-                
+
+                let client = wrapper.client;
+
                 // return new AuthResponse({
                 //     success: true,
                 //     reasonStr: AuthState.STEAM_GUARD_CODE_REQUEST.toString(),
@@ -97,60 +103,67 @@ function authRoute(router: ConnectRouter) {
                 //     sessionKey: sessionKey,
                 // });
 
-                let session = wrapper.session;
+                client.on('steamGuard', function (domain, callback) {
+                    console.log("Steam Guard callback");
+                    wrapper.steamGuardCallback = callback;
+                    requestSteamGuardCode();
+                });
 
-                session.on('authenticated', async () => {
-                    console.log(`session: Logged into Steam as ${session.accountName}`);
-                    let webCookies = await session.getWebCookies();
-                    console.log('Web cookies:', webCookies);
-
-                    if (webCookies) {
-                        var steamLoginData: SteamLoginData = {
-                            accessToken: session.accessToken,
-                            refreshToken: session.refreshToken,
-                            webCookies: webCookies
-                        };
-
-                        console.log('Steam login data:', steamLoginData);
-
-                        // console.log('Saving login data');
-                        // await reader.saveLoginData(steamLoginData);
-
-                        client.on('loggedOn', function (details) {
-                            console.log("client: Logged into Steam as " + client.steamID?.getSteam3RenderedID());
-                            client.setPersona(SteamUser.EPersonaState.Online);  // needed to update {@link client.users}
-                            succeed();
-                        });
-
-                        client.on('error', function (e) {
-                            // Some error occurred during logon
-                            console.log("Error during logon: " + e);
-                            fail();
-                            // client.logOff();
-                        });
-
-                        console.log('client: Logging on to Steam')
-                        client.logOn({
-                            refreshToken: steamLoginData.refreshToken,
-                        });
-                    } else {
-                        console.log('No web cookies received');
-                        fail();
-                        client.logOff();
+                function succeedOnLogin() {
+                    if (!wrapper.resolve) {
+                        return;
                     }
+                    if (wrapper.loggedOnDetails && (!wrapper.expectRefreshToken || wrapper.refreshToken)) {
+                        succeed(wrapper.refreshToken);
+                    }
+                }
+
+                client.on('loggedOn', function (details) {
+                    console.log("client: Logged into Steam as " + client.steamID?.getSteam3RenderedID());
+                    client.setPersona(SteamUser.EPersonaState.Online);  // needed to update {@link client.users}
+                    wrapper.loggedOnDetails = details;
+                    succeedOnLogin();
                 });
 
-                session.on('timeout', () => {
-                    console.log('This login attempt has timed out.');
-                    fail();
+                // manually patch index.d.ts to add these events:
+                /*
+                    refreshToken: [token: string];
+                    friendPersonasLoaded: [];
+                */
+                client.on('refreshToken', function (refreshToken: string) {
+                    console.log("client: Refresh token");
+                    wrapper.refreshToken = refreshToken;
+                    succeedOnLogin();
                 });
 
-                session.on('error', (err) => {
+                client.on('error', function (err) {
                     // This should ordinarily not happen. This only happens in case there's some kind of unexpected error while
                     // polling, e.g. the network connection goes down or Steam chokes on something.
                     console.log(`ERROR: This login attempt has failed! ${err.message}`);
                     fail();
+                    // client.logOff();
                 });
+
+                // client.on('timeout', () => {
+                //     console.log('This login attempt has timed out.');
+                //     fail();
+                // });
+
+                // TODO: allow multiple Steam Guard auth attempts
+                // TODO: maybe allow multiple login attempts?
+                console.log('client: Logging on to Steam');
+                if (call.refreshToken) {
+                    console.log("Using provided refresh token:", call.refreshToken)
+                    client.logOn({
+                        refreshToken: call.refreshToken,
+                    });
+                } else {
+                    console.log("Using provided username and password")
+                    client.logOn({
+                        accountName: call.username,
+                        password: call.password,
+                    });
+                }
             }
 
             function requestSteamGuardCode() {
@@ -173,93 +186,34 @@ function authRoute(router: ConnectRouter) {
                 }));
             }
 
-            function succeed() {
+            function succeed(refreshToken: string | undefined) {
                 let resolve = wrapper.resolve!;
                 resolve(new AuthResponse({
                     success: true,
                     reasonStr: AuthState.SUCCESS.toString(),
                     reason: AuthState.SUCCESS,
                     sessionKey: sessionKey,
+                    refreshToken: refreshToken,
                 }));
             }
 
-            function handleStartResult(startResult: StartSessionResponse) {
-                if (!startResult.actionRequired) {
-                    return;
-                }
-                console.log('Action is required from you to complete this login');
-
-                // We want to process the non-prompting guard types first, since the last thing we want to do is prompt the
-                // user for input. It would be needlessly confusing to prompt for input, then print more text to the console.
-                let promptingGuardTypes = [EAuthSessionGuardType.EmailCode, EAuthSessionGuardType.DeviceCode];
-                let promptingGuards = startResult.validActions!.filter(action => promptingGuardTypes.includes(action.type));
-                let nonPromptingGuards = startResult.validActions!.filter(action => !promptingGuardTypes.includes(action.type));
-
-                let printGuard = async ({ type, detail }: StartSessionResponseValidAction) => {
-                    try {
-                        switch (type) {
-                            case EAuthSessionGuardType.EmailCode:
-                                console.log(`A login code has been sent to your email address at ${detail}`);
-                                requestSteamGuardCode();
-                                break;
-
-                            case EAuthSessionGuardType.DeviceCode:
-                                console.log('You may confirm this login by providing a Steam Guard Mobile Authenticator code');
-                                requestSteamGuardCode();
-                                break;
-
-                            case EAuthSessionGuardType.EmailConfirmation:
-                                console.log('You may confirm this login by email');
-                                break;
-
-                            case EAuthSessionGuardType.DeviceConfirmation:
-                                console.log('You may confirm this login by responding to the prompt in your Steam mobile app');
-                                break;
-                        }
-                    } catch (ex: any) {
-                        if (ex.eresult == SteamUser.EResult.TwoFactorCodeMismatch) {
-                            console.log('Incorrect Steam Guard code');
-                            printGuard({ type, detail });
-                        } else {
-                            throw ex;
-                        }
-                    }
-                    // await printGuard(startResult.validActions![0] as { type: any; detail: any; });
-                }
-
-                nonPromptingGuards.forEach(printGuard);
-                promptingGuards.forEach(printGuard);
-            }
-
             console.log("Session key", sessionKey);
-            let client = wrapper.client;
-            let session = wrapper.session;
-
             return new Promise<AuthResponse>(async (resolve) => {
                 wrapper.resolve = resolve;
                 // https://github.com/DoctorMcKay/node-steam-session/blob/master/examples/login-with-password.ts
                 if (isNew) {
-                    console.log("Start with credentials");
-                    var startResult = await session.startWithCredentials({
-                        accountName: call.username,
-                        password: call.password,
-                        steamGuardCode: call.steamGuardCode,
-                    });
-                    handleStartResult(startResult);
-                    if (startResult.actionRequired) {
-                        return;
-                    }
                     return;
                 }
-                
+
                 if (call.steamGuardCode) {
                     console.log("Using provided Steam Guard code:", call.steamGuardCode)
                     try {
-                        await session.submitSteamGuardCode(call.steamGuardCode!);
+                        var callback = wrapper.steamGuardCallback!;
+                        wrapper.steamGuardCallback = undefined;
+                        callback!(call.steamGuardCode!);
                     } catch (ex: any) {
-                        console.log(typeof ex);
+                        console.log("Invalid Steam Guard code", typeof ex);
                         console.error(ex);
-                        console.log("Invalid Steam Guard code");
                         fail();
                         // client.logOff();
                     }
@@ -296,6 +250,25 @@ async function main() {
     console.log("Available endpoints:");
     endpoints.forEach((endpoint) => {
         console.log(endpoint);
+    });
+
+    // Cleanup function to terminate all SteamUser clients
+    const cleanup = async () => {
+        console.log("Cleaning up");
+        for (const [sessionKey, sessionWrapper] of activeSessions) {
+            try {
+                console.log(`Logging off ${sessionKey}`);
+                sessionWrapper.client.logOff();
+            } catch (ex) {
+                console.log(`Error while logging off ${sessionKey}`, ex);
+            }
+        }
+        console.log("Done cleanup");
+    };
+
+    // Register cleanup function on program termination
+    process.on('beforeExit', async () => {
+        await cleanup();
     });
 }
 

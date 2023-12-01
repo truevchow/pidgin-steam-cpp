@@ -3,6 +3,7 @@ import { createPromiseClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { AuthService } from './protobufs/comm_protobufs/auth_connect'
 import { AuthState } from './protobufs/comm_protobufs/auth_pb'
+import * as fs from 'fs';
 
 function genericPrompt(prompt: string, knownValue?: string, prefix: boolean = true) {
     const rl = readline.createInterface({
@@ -73,15 +74,56 @@ async function main() {
     let password = await passwordPrompt(process.env.STEAM_PASSWORD);
     var steamGuardCode: string | undefined;
 
-    // NOTE: using Steam Guard code initially results in DuplicateRequest error
-    // var steamGuardCode: string | undefined = await genericPrompt("Steam guard code", process.env.STEAM_GUARD_CODE);
-    // if (steamGuardCode == "") {
-    //     steamGuardCode = undefined;
-    // }
-    // console.log("Username:", username);
-    // console.log("Password", password);
-    // console.log("Steam guard code:", steamGuardCode);
-    // return;
+
+    interface RefreshTokens {
+        [username: string]: string;
+    }
+
+    function readRefreshTokens(): RefreshTokens {
+        const filePath = `${process.env.HOME}/.local/share/node-steamuser/refreshTokens.json`;
+        try {
+            const data = fs.readFileSync(filePath, 'utf8');
+            return JSON.parse(data);
+        } catch (error) {
+            console.error(`Failed to read refresh tokens: ${error}`);
+            return {};
+        }
+    }
+
+    function writeRefreshTokens(refreshTokens: RefreshTokens) {
+        const filePath = `${process.env.HOME}/.local/share/node-steamuser/refreshTokens.json`;
+        try {
+            const data = JSON.stringify(refreshTokens, null, 2);
+            fs.writeFileSync(filePath, data, 'utf8');
+        } catch (error) {
+            console.error(`Failed to write refresh tokens: ${error}`);
+        }
+    }
+
+    function updateRefreshTokens(refreshTokens: RefreshTokens, username: string, refreshToken: string | undefined) {
+        if (!refreshToken) {
+            return;
+        }
+        refreshTokens[username] = refreshToken;
+        writeRefreshTokens(refreshTokens);
+    }
+
+    // Try auth once with refresh token
+    const refreshTokens = readRefreshTokens();
+    const refreshToken = refreshTokens[username];
+    if (refreshToken) {
+        console.log("Using refresh token");
+        const res = await client.authenticate({
+            username: username,
+            refreshToken: refreshToken,
+        });
+        if (res.reason == AuthState.SUCCESS) {
+            console.log("Successfully logged on");
+            sessionKey = res.sessionKey;
+            updateRefreshTokens(refreshTokens, username, res.refreshToken);
+            return;
+        }
+    }
 
     var tries = 0;
     while (true) {
@@ -106,6 +148,7 @@ async function main() {
             return;
         } else if (res.reason == AuthState.SUCCESS) {
             console.log("Successfully logged on");
+            updateRefreshTokens(refreshTokens, username, res.refreshToken);
             break;
         }
     }
