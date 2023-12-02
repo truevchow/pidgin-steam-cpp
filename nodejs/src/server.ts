@@ -44,7 +44,7 @@ let activeSessions: Map<string, SessionWrapper> = new Map();
 function authRoute(router: ConnectRouter) {
     router.service(AuthService, {
         async authenticate(call) {
-            console.log("Received", call.toJson());
+            // console.log("Received", call.toJson());
             let sessionKey: string;
             let wrapper: SessionWrapper;
             let isNew: boolean;
@@ -145,7 +145,7 @@ function authRoute(router: ConnectRouter) {
                 // TODO: maybe allow multiple login attempts?
                 console.log('client: Logging on to Steam');
                 if (call.refreshToken) {
-                    console.log("Using provided refresh token:", call.refreshToken)
+                    console.log("Using provided refresh token")
                     client.logOn({
                         refreshToken: call.refreshToken,
                     });

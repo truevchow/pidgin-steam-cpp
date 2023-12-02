@@ -5,6 +5,7 @@ import { AuthService } from './protobufs/comm_protobufs/auth_connect'
 import { AuthState } from './protobufs/comm_protobufs/auth_pb'
 import * as fs from 'fs';
 
+
 function genericPrompt(prompt: string, knownValue?: string, prefix: boolean = true) {
     const rl = readline.createInterface({
         input: process.stdin,
@@ -61,25 +62,15 @@ function passwordPrompt(knownValue?: string) {
     });
 };
 
-const transport = createConnectTransport({
-    httpVersion: "1.1",
-    baseUrl: "http://localhost:8080/",
-});
+class AuthWrapper {
+    private sessionKey: string | undefined;
+    private client: any;
 
-async function main() {
-    const client = createPromiseClient(AuthService, transport);
-    var sessionKey: string | undefined = process.env.SESSION_ID;
-    console.log("Session key:", sessionKey);
-    let username = await genericPrompt("username", process.env.STEAM_USERNAME);
-    let password = await passwordPrompt(process.env.STEAM_PASSWORD);
-    var steamGuardCode: string | undefined;
-
-
-    interface RefreshTokens {
-        [username: string]: string;
+    constructor(private transport: any) {
+        this.client = createPromiseClient(AuthService, this.transport);
     }
 
-    function readRefreshTokens(): RefreshTokens {
+    private readRefreshTokens(): any {
         const filePath = `${process.env.HOME}/.local/share/node-steamuser/refreshTokens.json`;
         try {
             const data = fs.readFileSync(filePath, 'utf8');
@@ -90,7 +81,7 @@ async function main() {
         }
     }
 
-    function writeRefreshTokens(refreshTokens: RefreshTokens) {
+    private writeRefreshTokens(refreshTokens: any) {
         const filePath = `${process.env.HOME}/.local/share/node-steamuser/refreshTokens.json`;
         try {
             const data = JSON.stringify(refreshTokens, null, 2);
@@ -100,57 +91,81 @@ async function main() {
         }
     }
 
-    function updateRefreshTokens(refreshTokens: RefreshTokens, username: string, refreshToken: string | undefined) {
+    private updateRefreshTokens(refreshTokens: any, username: string, refreshToken: string | undefined) {
         if (!refreshToken) {
             return;
         }
         refreshTokens[username] = refreshToken;
-        writeRefreshTokens(refreshTokens);
+        this.writeRefreshTokens(refreshTokens);
     }
 
-    // Try auth once with refresh token
-    const refreshTokens = readRefreshTokens();
-    const refreshToken = refreshTokens[username];
-    if (refreshToken) {
-        console.log("Using refresh token");
-        const res = await client.authenticate({
-            username: username,
-            refreshToken: refreshToken,
-        });
-        if (res.reason == AuthState.SUCCESS) {
-            console.log("Successfully logged on");
-            sessionKey = res.sessionKey;
-            updateRefreshTokens(refreshTokens, username, res.refreshToken);
-            return;
-        }
+    public async login() {
+        await this._login();
+        return this.sessionKey!;
     }
 
-    var tries = 0;
-    while (true) {
-        tries++;
-        if (tries > 3) {
-            console.log("Too many tries!");
-            return;
+    private async _login() {
+        console.log("Session key:", this.sessionKey);
+        let username = await genericPrompt("username", process.env.STEAM_USERNAME);
+        let password = await passwordPrompt(process.env.STEAM_PASSWORD);
+        var steamGuardCode: string | undefined;
+
+        // Try auth once with refresh token
+        const refreshTokens = this.readRefreshTokens();
+        const refreshToken = refreshTokens[username];
+        if (refreshToken) {
+            console.log("Using refresh token");
+            const res = await this.client.authenticate({
+                username: username,
+                refreshToken: refreshToken,
+            });
+            if (res.reason == AuthState.SUCCESS) {
+                console.log("Successfully logged on");
+                this.sessionKey = res.sessionKey;
+                this.updateRefreshTokens(refreshTokens, username, res.refreshToken);
+                return;
+            }
         }
-        console.log("Attempt with session key", sessionKey);
-        const res = await client.authenticate({
-            username: username,
-            password: password,
-            steamGuardCode: steamGuardCode,
-            sessionKey: sessionKey,
-        });
-        console.log("Got session key:", res.sessionKey);
-        sessionKey = res.sessionKey;
-        if (res.reason == AuthState.STEAM_GUARD_CODE_REQUEST) {
-            steamGuardCode = await genericPrompt("Steam guard code");
-        } else if (res.reason == AuthState.INVALID_CREDENTIALS) {
-            console.log("Invalid credentials!");
-            return;
-        } else if (res.reason == AuthState.SUCCESS) {
-            console.log("Successfully logged on");
-            updateRefreshTokens(refreshTokens, username, res.refreshToken);
-            break;
+
+        for (let tries = 1; tries <= 3; tries++) {
+            console.log("Attempt", tries, "with session key", this.sessionKey);
+            const res = await this.client.authenticate({
+                username: username,
+                password: password,
+                steamGuardCode: steamGuardCode,
+                sessionKey: this.sessionKey,
+            });
+            console.log("Got session key:", res.sessionKey);
+            this.sessionKey = res.sessionKey;
+            if (res.reason == AuthState.STEAM_GUARD_CODE_REQUEST) {
+                steamGuardCode = await genericPrompt("Steam guard code");
+            } else if (res.reason == AuthState.INVALID_CREDENTIALS) {
+                console.log("Invalid credentials!");
+                throw new Error("Invalid credentials");
+            } else if (res.reason == AuthState.SUCCESS) {
+                console.log("Successfully logged on");
+                this.updateRefreshTokens(refreshTokens, username, res.refreshToken);
+                break;
+            }
         }
+        console.log("Too many tries!");
+        throw new Error("Too many tries");
+    }
+}
+
+const transport = createConnectTransport({
+    httpVersion: "1.1",
+    baseUrl: "http://localhost:8080/",
+});
+
+async function main() {
+    const authWrapper = new AuthWrapper(transport);
+    try {
+        await authWrapper.login();
+        console.log("Login successful");
+    } catch (error) {
+        console.error("Login failed:", error);
+        throw error;
     }
 }
 
