@@ -21,13 +21,15 @@ message AuthRequest {
     optional string refreshToken = 5;  // preferred to username/password
 }
 
-enum AuthState {
-    SUCCESS = 0;
-    INVALID_CREDENTIALS = 1;
-    STEAM_GUARD_CODE_REQUEST = 2;
-}
+
 
 message AuthResponse {
+    enum AuthState {
+        SUCCESS = 0;
+        INVALID_CREDENTIALS = 1;
+        STEAM_GUARD_CODE_REQUEST = 2;
+    }
+
     bool success = 1;
     AuthState reason = 2;
     string sessionKey = 3;  // identifies session for e.g. Steam Guard token

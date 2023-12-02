@@ -1,9 +1,13 @@
 import * as readline from 'readline';
-import { createPromiseClient } from "@connectrpc/connect";
+import { PromiseClient, createPromiseClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { AuthService } from './protobufs/comm_protobufs/auth_connect'
-import { AuthState } from './protobufs/comm_protobufs/auth_pb'
+import { AuthResponse_AuthState } from './protobufs/comm_protobufs/auth_pb'
+import { MessageService } from './protobufs/comm_protobufs/message_connect'
+import { MessageRequest, SendMessageResult, ResponseMessage, PollRequest, FriendsListRequest, FriendsListResponse } from './protobufs/comm_protobufs/message_pb'
 import * as fs from 'fs';
+import { AnyMessage, MethodInfoServerStreaming, MethodKind } from '@bufbuild/protobuf';
+// import { MethodInfoServerStreaming } from "@connectrpc/connect/dist/cjs/promise-client";
 
 
 function genericPrompt(prompt: string, knownValue?: string, prefix: boolean = true) {
@@ -119,7 +123,7 @@ class AuthWrapper {
                 username: username,
                 refreshToken: refreshToken,
             });
-            if (res.reason == AuthState.SUCCESS) {
+            if (res.reason == AuthResponse_AuthState.SUCCESS) {
                 console.log("Successfully logged on");
                 this.sessionKey = res.sessionKey;
                 this.updateRefreshTokens(refreshTokens, username, res.refreshToken);
@@ -137,12 +141,12 @@ class AuthWrapper {
             });
             console.log("Got session key:", res.sessionKey);
             this.sessionKey = res.sessionKey;
-            if (res.reason == AuthState.STEAM_GUARD_CODE_REQUEST) {
+            if (res.reason == AuthResponse_AuthState.STEAM_GUARD_CODE_REQUEST) {
                 steamGuardCode = await genericPrompt("Steam guard code");
-            } else if (res.reason == AuthState.INVALID_CREDENTIALS) {
+            } else if (res.reason == AuthResponse_AuthState.INVALID_CREDENTIALS) {
                 console.log("Invalid credentials!");
                 throw new Error("Invalid credentials");
-            } else if (res.reason == AuthState.SUCCESS) {
+            } else if (res.reason == AuthResponse_AuthState.SUCCESS) {
                 console.log("Successfully logged on");
                 this.updateRefreshTokens(refreshTokens, username, res.refreshToken);
                 break;
@@ -153,6 +157,51 @@ class AuthWrapper {
     }
 }
 
+class MessageClient {
+    // private client: PromiseClient<{
+    //     readonly typeName: "steam.MessageService";
+    //     readonly methods: {
+    //         readonly sendChatMessage: { readonly name: "SendChatMessage"; readonly I: typeof MessageRequest; readonly O: typeof SendMessageResult; readonly kind: MethodKind.Unary; };
+    //         readonly pollChatMessages: MethodInfoServerStreaming<PollRequest, ResponseMessage>;
+    //         readonly getFriendsList: { readonly name: "GetFriendsList"; readonly I: typeof FriendsListRequest; readonly O: typeof FriendsListResponse; readonly kind: MethodKind.Unary; };
+    //     }; }>;
+    private client = createPromiseClient(MessageService, this.transport);
+    private sessionKey: string;
+
+    constructor(private transport: any, sessionKey: string) {
+        // this.client = createPromiseClient(MessageService, this.transport);
+        this.sessionKey = sessionKey;
+    }
+
+    public async sendMessage(targetId: string, message: string) {
+        console.log("Sending message:", message)
+        const res = await this.client.sendChatMessage({
+            sessionKey: this.sessionKey,
+            targetId: targetId,
+            message: message,
+        });
+        console.log("Message sent:", res);
+    }
+
+    public async pollMessages() {
+        console.log("Polling messages")
+        const res = this.client.pollChatMessages({
+            sessionKey: this.sessionKey,
+        });
+        for await (const message of res) {
+            console.log("Received message:", message);
+        }
+    }
+    public async getFriendsList() {
+        console.log("Getting friends list")
+        const res = await this.client.getFriendsList({
+            sessionKey: this.sessionKey,
+        });
+        console.log("Friends list:", res);
+    }
+}
+
+
 const transport = createConnectTransport({
     httpVersion: "1.1",
     baseUrl: "http://localhost:8080/",
@@ -160,13 +209,21 @@ const transport = createConnectTransport({
 
 async function main() {
     const authWrapper = new AuthWrapper(transport);
+    let sessionKey : string;
     try {
-        await authWrapper.login();
+        sessionKey = await authWrapper.login();
         console.log("Login successful");
     } catch (error) {
         console.error("Login failed:", error);
         throw error;
     }
+
+    await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait for 2 seconds
+
+    const messageClient = new MessageClient(transport, sessionKey);
+    // await messageClient.sendMessage("Hello world!");
+    // await messageClient.pollMessages();
+    await messageClient.getFriendsList();
 }
 
 main().catch((err) => {
