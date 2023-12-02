@@ -32,6 +32,7 @@ message SendMessageResult {
 message PollRequest {
     string targetId = 1;
     string sessionKey = 2;
+    optional google.protobuf.Timestamp lastTimestamp = 3;
 }
 
 message ResponseMessage {

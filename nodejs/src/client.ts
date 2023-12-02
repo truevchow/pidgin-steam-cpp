@@ -4,7 +4,7 @@ import { createConnectTransport } from "@connectrpc/connect-node";
 import { AuthService } from './protobufs/comm_protobufs/auth_connect'
 import { AuthResponse_AuthState } from './protobufs/comm_protobufs/auth_pb'
 import { MessageService } from './protobufs/comm_protobufs/message_connect'
-import { MessageRequest, SendMessageResult, ResponseMessage, PollRequest, FriendsListRequest, FriendsListResponse } from './protobufs/comm_protobufs/message_pb'
+import { MessageRequest, SendMessageResult, ResponseMessage, PollRequest, FriendsListRequest, FriendsListResponse, Persona } from './protobufs/comm_protobufs/message_pb'
 import * as fs from 'fs';
 import { AnyMessage, MethodInfoServerStreaming, MethodKind } from '@bufbuild/protobuf';
 // import { MethodInfoServerStreaming } from "@connectrpc/connect/dist/cjs/promise-client";
@@ -180,24 +180,27 @@ class MessageClient {
             targetId: targetId,
             message: message,
         });
-        console.log("Message sent:", res);
+        return res;
     }
 
-    public async pollMessages() {
-        console.log("Polling messages")
+    public async pollMessages(targetId: string): Promise<ResponseMessage[]> {
+        console.log("Polling messages");
         const res = this.client.pollChatMessages({
             sessionKey: this.sessionKey,
+            targetId: targetId,
         });
+        const messages: ResponseMessage[] = [];
         for await (const message of res) {
-            console.log("Received message:", message);
+            messages.push(message);
         }
+        return messages;
     }
+
     public async getFriendsList() {
-        console.log("Getting friends list")
-        const res = await this.client.getFriendsList({
+        console.log("Getting friends list");
+        return (await this.client.getFriendsList({
             sessionKey: this.sessionKey,
-        });
-        console.log("Friends list:", res);
+        })).friends;
     }
 }
 
@@ -223,7 +226,38 @@ async function main() {
     const messageClient = new MessageClient(transport, sessionKey);
     // await messageClient.sendMessage("Hello world!");
     // await messageClient.pollMessages();
-    await messageClient.getFriendsList();
+    var friends = await messageClient.getFriendsList();
+    console.log(friends);
+
+    // keep accepting user input
+    // first read index of friend to send message to
+    // then read message to send
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    for (var i = 0; i < 4; ++i) {
+        console.log("Enter index of friend to send message to:");
+        for (let i = 0; i < friends.length; i++) {
+            console.log(i, friends[i].name);
+        }
+        let index = await genericPrompt("index", undefined, false);
+        const friend: Persona = friends[parseInt(index)];
+
+        // Fetch messages
+        let messages = await messageClient.pollMessages(friend.id);
+        console.log("Messages:");
+        for (const message of messages) {
+            console.log(message.senderId, friend.name, message.timestamp?.toDate(), message.message);
+        }
+
+        console.log("Enter message to send to", friend.name);
+        let message = await genericPrompt("message", undefined, false);
+        let sendResult = await messageClient.sendMessage(friend.id, message);
+        if (!sendResult.success) {
+            console.error("Failed to send message:", sendResult.reasonStr);
+        }
+    }
 }
 
 main().catch((err) => {

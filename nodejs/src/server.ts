@@ -273,13 +273,13 @@ function messageRoute(router: ConnectRouter) {
                 });
             }
             let client = wrapper.client;
-            let steamID = new SteamID(call.targetId!);
+            let steamId = new SteamID(call.targetId!);
             let message = call.message!;
 
             try {
-                await client.chat.sendFriendMessage(steamID, message);
+                await client.chat.sendFriendMessage(steamId, message);
             } catch (ex: any) {
-                console.log("Error while sending message", typeof ex);
+                console.log("Error while sending message", steamId, message);
                 console.error(ex);
                 return new SendMessageResult({
                     success: false,
@@ -299,27 +299,32 @@ function messageRoute(router: ConnectRouter) {
             let sessionKey = call.sessionKey!;
             let wrapper = activeSessions.get(sessionKey);
             if (!wrapper) {
+                console.log("Invalid session key", sessionKey)
                 return;
             }
             let client = wrapper.client;
-            let steamID = new SteamID(call.targetId!);
+            let steamId = new SteamID(call.targetId!);
 
-            let { messages, more_available } = await client.chat.getFriendMessageHistory(steamID, {
-                startTime: Date.now() - 1000 * 60 * 60 * 24 * 1, // 1 day ago
+            console.log("Polling messages for", steamId)
+            let { messages, more_available } = await client.chat.getFriendMessageHistory(steamId, {
+                // startTime: Date.now() - 1000 * 60 * 60 * 24 * 1, // 1 day ago
+                lastTime: call.lastTimestamp?.toDate(),
             });
 
-            async function* generateMessages() {
-                for await (let message of messages) {
-                    console.log("Message", message);
-                    yield new ResponseMessage({
-                        senderId: message.sender.getSteamID64(),
-                        message: message.message,
-                        timestamp: Timestamp.fromDate(message.server_timestamp),
-                    });
-                }
-            }
+            // NOTE: messages should already be in reverse-chronological order
+            //       but sort them in chronological order for client convenience
+            messages.sort((a, b) => Number(a.server_timestamp) - Number(b.server_timestamp));
 
-            return generateMessages();
+            console.log("more_available", more_available)
+            for await (let message of messages) {
+                console.log("Message", message);
+                yield new ResponseMessage({
+                    senderId: message.sender.getSteamID64(),
+                    message: message.message,
+                    timestamp: Timestamp.fromDate(message.server_timestamp),
+                });
+            }
+            console.log("Done polling messages")
         },
         async getFriendsList(call: FriendsListRequest) {
             console.log("Received", call.getType().typeName, call.toJson());
