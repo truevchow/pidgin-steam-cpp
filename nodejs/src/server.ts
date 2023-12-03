@@ -12,6 +12,7 @@ import SteamUser from 'steam-user';
 // import {EAccountType, EPersonaState } from 'steamid';
 import SteamID from 'steamid';
 import { Timestamp } from "@bufbuild/protobuf";
+import SteamChatRoomClient from "steam-user/components/chatroom";
 
 interface SteamClientUserUpdate {  // emitted in `user` event
     rich_presence: any[];
@@ -306,17 +307,29 @@ function messageRoute(router: ConnectRouter) {
             let steamId = new SteamID(call.targetId!);
 
             console.log("Polling messages for", steamId)
-            let { messages, more_available } = await client.chat.getFriendMessageHistory(steamId, {
-                // startTime: Date.now() - 1000 * 60 * 60 * 24 * 1, // 1 day ago
-                lastTime: call.lastTimestamp?.toDate(),
-            });
+            // https://stackoverflow.com/questions/46754984/typescript-how-to-use-not-exported-type-definitions/46763911#46763911
+            // https://stackoverflow.com/questions/48011353/how-to-unwrap-the-type-of-a-promise
+            type FriendMessageArray = ReturnType<SteamChatRoomClient['getFriendMessageHistory']> extends Promise<{ messages: infer U, more_available: boolean } > ? U : never;
+            const allMessages: FriendMessageArray = [];
+            var lastTime = call.lastTimestamp?.toDate();
+            for (var i = 0; i < 10; ++i) {
+                console.log("lastTime", lastTime)
+                let { messages, more_available } = await client.chat.getFriendMessageHistory(steamId, {
+                    lastTime: lastTime,
+                });
+                console.log("more_available", more_available);
+                allMessages.push(...messages);
+                if (!more_available) {
+                    break;
+                }
+                lastTime = new Date(messages[messages.length - 1].server_timestamp.getTime() - 1);  // 1 ms before last message
+            }
 
             // NOTE: messages should already be in reverse-chronological order
             //       but sort them in chronological order for client convenience
-            messages.sort((a, b) => Number(a.server_timestamp) - Number(b.server_timestamp));
+            allMessages.sort((a, b) => a.server_timestamp.getTime() - b.server_timestamp.getTime());
 
-            console.log("more_available", more_available)
-            for await (let message of messages) {
+            for await (let message of allMessages) {
                 console.log("Message", message);
                 yield new ResponseMessage({
                     senderId: message.sender.getSteamID64(),
@@ -387,7 +400,7 @@ function messageRoute(router: ConnectRouter) {
 }
 
 async function main() {
-    const server = fastify();
+    const server = fastify({http2: true});
     const endpoints: string[] = [];
 
     await server.register(fastifyConnectPlugin, {

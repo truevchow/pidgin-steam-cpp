@@ -206,7 +206,7 @@ class MessageClient {
 
 
 const transport = createConnectTransport({
-    httpVersion: "1.1",
+    httpVersion: "2",
     baseUrl: "http://localhost:8080/",
 });
 

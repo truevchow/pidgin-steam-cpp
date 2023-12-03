@@ -64,6 +64,17 @@ https://github.com/bufbuild/protobuf-es
 
 doesn't generate files for service
 
+### Protobuf for C++, CMake build
+
+Unfortunately the CMake documentation is also lacking
+https://stackoverflow.com/questions/52533396/cmake-cant-find-protobuf-protobuf-generate-cpp?rq=3 \
+[Google gRPC example](https://github.com/protocolbuffers/protobuf/blob/main/docs/cmake_protobuf_generate.md#grpc-example)
+
+[protobuf_generate example](https://stackoverflow.com/questions/52533396/cmake-cant-find-protobuf-protobuf-generate-cpp?rq=3)
+[another protobuf_generate example](https://github.com/protocolbuffers/protobuf/blob/main/docs/cmake_protobuf_generate.md#grpc-example)
+
+[bazel](https://grpc.io/blog/bazel-rules-protobuf/)
+
 ## Notes
 
 ### C++
