@@ -13,22 +13,22 @@ static const char *steam_list_icon(PurpleAccount *account, PurpleBuddy *buddy) {
 
 static gchar *steam_status_text(PurpleBuddy *buddy) {
     purple_debug_info("dummy", "steam_status_text start\n");
-//    SteamBuddy *sbuddy = buddy->proto_data;
-//    if (sbuddy && sbuddy->gameextrainfo) {
-//        if (sbuddy->gameid && *(sbuddy->gameid)) {
-//            return g_markup_printf_escaped("In game %s", sbuddy->gameextrainfo);
-//        } else {
-//            return g_markup_printf_escaped("In non-Steam game %s", sbuddy->gameextrainfo);
-//        }
-//    }
+    auto *sbuddy = static_cast<SteamBuddy *>(buddy->proto_data);
+    if (sbuddy && !sbuddy->gameextrainfo.empty()) {
+        if (!sbuddy->gameid.empty()) {
+            return g_markup_printf_escaped("In game %s", sbuddy->gameextrainfo.c_str());
+        } else {
+            return g_markup_printf_escaped("In non-Steam game %s", sbuddy->gameextrainfo.c_str());
+        }
+    }
     return g_markup_printf_escaped("Not implemented [steam_status_text]");  // TODO
 }
 
 static void steam_close(PurpleConnection *pc) {
     purple_debug_info("dummy", "steam_close start\n");
-    SteamAccount &sa = *static_cast<SteamAccount *>(pc->proto_data);
-    purple_timeout_remove(sa.poll_callback_id);
-    delete static_cast<SteamAccount *>(pc->proto_data);
+    auto *sa = static_cast<SteamAccount *>(pc->proto_data);
+    purple_timeout_remove(sa->poll_callback_id);
+    delete sa;
 }
 
 void receive_messages(SteamAccount &sa) {
@@ -225,6 +225,11 @@ static unsigned int steam_send_typing(PurpleConnection *pc, const gchar *name, P
 static void steam_login(PurpleAccount *account) {
     purple_debug_info("dummy", "steam_login start\n");
     PurpleConnection *pc = purple_account_get_connection(account);
+    if (pc->proto_data != nullptr) {
+        purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_INVALID_USERNAME,
+                                       "Already logged in");
+        return;
+    }
     auto *p_sa = new SteamAccount();
     pc->proto_data = p_sa;
     SteamAccount &sa = *p_sa;
@@ -242,7 +247,7 @@ static void steam_login(PurpleAccount *account) {
     sa.pc = pc;
     sa.username = sa.account->username;
     sa.password = sa.account->password;
-    sa.poll_callback_id = purple_timeout_add_seconds(1, (GSourceFunc) poll_for_messages, pc);
+    sa.poll_callback_id = purple_timeout_add(100, (GSourceFunc) poll_for_messages, pc);
 
     // sa->hostname_ip_cache = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
     // sa->sent_messages_hash = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, nullptr);

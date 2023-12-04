@@ -163,6 +163,25 @@ struct SteamAccount {
         g_free(ptr);
     }
 };
+
+struct SteamBuddy {
+    SteamAccount *sa;
+    PurpleBuddy *buddy;
+
+    std::string steamid;
+    std::string personaname;
+    std::string realname;
+    std::string profileurl;
+    guint lastlogoff;
+    std::string avatar;
+    guint personastateflags;
+
+    std::string gameid;
+    std::string gameextrainfo;
+    std::string gameserversteamid;
+    std::string lobbysteamid;
+    std::string gameserverip;
+};
 #endif
 
 #define STEAMID_IS_GROUP(id) G_UNLIKELY(((g_ascii_strtoll((id), NULL, 10) >> 52) & 0x0F) == 7)
