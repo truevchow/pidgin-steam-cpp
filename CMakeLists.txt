@@ -28,32 +28,40 @@ file(GLOB PROTO_IMPORT_FILES "${CMAKE_CURRENT_SOURCE_DIR}/protobufs_src/comm_pro
 #message("Protobuf_INCLUDE_DIRS: ${Protobuf_INCLUDE_DIRS}")
 #set_source_files_properties(${PROTO_SRCS} ${PROTO_HDRS} PROPERTIES GENERATED TRUE)
 
-add_executable(grpc_experiment
-        src/grpc_exp.cpp
+add_library(grpc_wrapper
         ${PROTO_IMPORT_FILES}
-#        ${PROTO_SRCS} ${PROTO_HDRS}
+        src/grpc_client_wrapper.cpp src/grpc_client_wrapper.h
 )
-target_link_libraries(grpc_experiment
+target_link_libraries(grpc_wrapper
         ${Protobuf_LIBRARIES}
         gRPC::grpc++
+)
+target_include_directories(grpc_wrapper PUBLIC "$<BUILD_INTERFACE:${PROTO_BINARY_DIR}>")
+
+add_executable(grpc_experiment
+        src/grpc_exp.cpp
+        src/grpc_client_wrapper.h
+        #        ${PROTO_SRCS} ${PROTO_HDRS}
+)
+target_link_libraries(grpc_experiment
         #        ${LIBPURPLE_LIBRARIES}
         cppcoro
+        grpc_wrapper
 )
-target_include_directories(grpc_experiment PUBLIC "$<BUILD_INTERFACE:${PROTO_BINARY_DIR}>")
 
 #protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${PROTO_IMPORT_FILES})
 #protobuf_generate_grpc_cpp(PROTO_GRPC_SRCS PROTO_GRPC_HDRS ${PROTO_IMPORT_FILES})
 get_target_property(grpc_cpp_plugin_location gRPC::grpc_cpp_plugin LOCATION)
 
 protobuf_generate(
-        TARGET grpc_experiment
+        TARGET grpc_wrapper
         IMPORT_DIRS ${PROTO_IMPORT_DIRS}
         PROTOC_OUT_DIR "${PROTO_BINARY_DIR}"
 )
 protobuf_generate(
     TARGET
 #        pidgin_steam
-        grpc_experiment
+        grpc_wrapper
     LANGUAGE grpc
     GENERATE_EXTENSIONS .grpc.pb.h .grpc.pb.cc
     #        PLUGIN "protoc-gen-grpc=\$<TARGET_FILE:gRPC::grpc_cpp_plugin>"
@@ -74,7 +82,8 @@ add_library(pidgin_steam SHARED
         src/libdummy.cpp src/libdummy.h src/ipc_pipe.h
         src/coro_utils.h
         ${Protobuf_LIBRARIES}
-        )
+        src/grpc_client_wrapper.h
+)
 
 #target_compile_options(pidgin_steam PUBLIC -fsanitize=address)
 #target_link_options(pidgin_steam PUBLIC -lasan)
@@ -109,6 +118,7 @@ target_link_libraries(pidgin_steam
     #    /usr/lib/x86_64-linux-gnu
     ${LIBPURPLE_LIBRARIES}
     cppcoro
+    grpc_wrapper
 #    glib-2.0
 #    json-glib-1.0
 #    secret-1
