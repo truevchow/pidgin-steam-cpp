@@ -4,6 +4,8 @@
 
 #include "grpc_client_wrapper.h"
 #include <grpcpp/grpcpp.h>
+
+#include <utility>
 #include "../protobufs/comm_protobufs/message.pb.h"
 #include "../protobufs/comm_protobufs/message.grpc.pb.h"
 #include "../protobufs/comm_protobufs/auth.pb.h"
@@ -17,6 +19,8 @@ namespace SteamClient {
         std::unique_ptr<steam::AuthService::Stub> authStub;
         std::unique_ptr<steam::MessageService::Stub> messageStub;
 
+        SteamClient::AuthResponseState lastAuthResponseState = AUTH_UNKNOWN_FAILURE;
+        bool lastSuccessState = false;
         std::optional<std::string> sessionKey;
 
         explicit impl(std::string url) {
@@ -25,10 +29,16 @@ namespace SteamClient {
             messageStub = steam::MessageService::NewStub(channel);
         }
 
-        bool authenticate(std::string username, std::string password) {
+        std::tuple<AuthResponseState, std::string> _authenticate(std::string username, std::string password, std::optional<std::string> steamGuardCode) {
             steam::AuthRequest request;
             request.set_username(username);
             request.set_password(password);
+            if (steamGuardCode.has_value()) {
+                request.set_steamguardcode(steamGuardCode.value());
+            }
+            if (sessionKey.has_value()) {
+                request.set_sessionkey(sessionKey.value());
+            }
 
             steam::AuthResponse response;
             grpc::ClientContext context;
@@ -36,16 +46,47 @@ namespace SteamClient {
             if (!status.ok()) {
                 std::cout << "Auth failed (gRPC failure)" << std::endl;
                 std::cout << status.error_code() << ": " << status.error_message() << std::endl;
-                return false;
+                return {AUTH_UNKNOWN_FAILURE, response.sessionkey()};
             }
-            if (!response.success()) {
-                std::cout << "Auth failed (Steam failure): " << response.reasonstr() << std::endl;
-                return false;
+            switch (response.reason()) {
+                case steam::AuthResponse_AuthState_SUCCESS:
+                    std::cout << "Auth successful" << std::endl;
+                    std::cout << "Session key " << response.sessionkey() << std::endl;
+                    return {AUTH_SUCCESS, response.sessionkey()};
+                case steam::AuthResponse_AuthState_INVALID_CREDENTIALS:
+                    std::cout << "Auth failed (invalid credentials)" << std::endl;
+                    return {AUTH_INVALID_CREDENTIALS, response.sessionkey()};
+                case steam::AuthResponse_AuthState_STEAM_GUARD_CODE_REQUEST:
+                    std::cout << "Auth failed (pending Steam Guard code)" << std::endl;
+                    return {AUTH_PENDING_STEAM_GUARD_CODE, response.sessionkey()};
+                default:
+                    std::cout << "Auth failed (unknown failure)" << std::endl;
+                    return {AUTH_UNKNOWN_FAILURE, response.sessionkey()};
             }
-            std::cout << "Auth successful" << std::endl;
-            std::cout << "Session key " << response.sessionkey() << std::endl;
-            sessionKey = response.sessionkey();
-            return true;
+        }
+
+        AuthResponseState authenticate(std::string username, std::string password, std::optional<std::string> steamGuardCode) {
+            auto [state, newSessionKey] = _authenticate(std::move(username), std::move(password), std::move(steamGuardCode));
+            this->lastAuthResponseState = state;
+            switch (state) {
+                case AUTH_SUCCESS:
+                    this->lastSuccessState = true;
+                    this->sessionKey = newSessionKey;
+                    break;
+                case AUTH_INVALID_CREDENTIALS:
+                    this->lastSuccessState = false;
+                    this->sessionKey = std::nullopt;
+                    break;
+                case AUTH_PENDING_STEAM_GUARD_CODE:
+                    this->lastSuccessState = true;
+                    this->sessionKey = newSessionKey;
+                    break;
+                case AUTH_UNKNOWN_FAILURE:
+                    this->lastSuccessState = false;
+                    this->sessionKey = std::nullopt;
+                    break;
+            }
+            return state;
         }
 
         std::vector<Buddy> getFriendsList() {
@@ -92,10 +133,42 @@ namespace SteamClient {
                 Message message;
                 message.senderId = response.senderid();  // TODO: send persona info for mapping
                 message.message = response.message();
-                message.timestamp_ns = response.timestamp().nanos();
+                message.timestamp_ns = response.timestamp().seconds() * 1000000000LL + response.timestamp().nanos();
                 messages.push_back(message);
             }
             return messages;
+        }
+
+        SendMessageCode sendMessage(std::string id, std::string message) {
+            steam::MessageRequest request;
+            request.set_sessionkey(sessionKey.value());
+            request.set_targetid(id);
+            request.set_message(message);
+            grpc::ClientContext context;
+            steam::SendMessageResult response;
+            grpc::Status status = messageStub->SendChatMessage(&context, request, &response);
+            if (!status.ok()) {
+                std::cout << "SendMessage failed (gRPC failure)" << std::endl;
+                std::cout << status.error_code() << ": " << status.error_message() << std::endl;
+                return SEND_UNKNOWN_FAILURE;
+            }
+            switch (response.reason()) {
+                case steam::SendMessageResult_SendMessageResultCode_SUCCESS:
+                    std::cout << "SendMessage successful" << std::endl;
+                    return SEND_SUCCESS;
+                case steam::SendMessageResult_SendMessageResultCode_INVALID_SESSION_KEY:
+                    std::cout << "SendMessage failed (invalid session key)" << std::endl;
+                    return SEND_INVALID_SESSION_KEY;
+                case steam::SendMessageResult_SendMessageResultCode_INVALID_TARGET_ID:
+                    std::cout << "SendMessage failed (invalid target ID)" << std::endl;
+                    return SEND_INVALID_TARGET_ID;
+                case steam::SendMessageResult_SendMessageResultCode_INVALID_MESSAGE:
+                    std::cout << "SendMessage failed (invalid message)" << std::endl;
+                    return SEND_INVALID_MESSAGE;
+                default:
+                    std::cout << "SendMessage failed (unknown failure)" << std::endl;
+                    return SEND_UNKNOWN_FAILURE;
+            }
         }
     };
 
@@ -103,8 +176,8 @@ namespace SteamClient {
         pImpl = std::make_unique<impl>(url);
     }
 
-    bool ClientWrapper::authenticate(std::string username, std::string password) {
-        return pImpl->authenticate(username, password);
+    AuthResponseState ClientWrapper::authenticate(std::string username, std::string password, std::optional<std::string> steamGuardCode) {
+        return pImpl->authenticate(username, password, steamGuardCode);
     }
 
     std::vector<Buddy> ClientWrapper::getFriendsList() {
@@ -113,5 +186,17 @@ namespace SteamClient {
 
     std::vector<Message> ClientWrapper::getMessages(std::string id, std::optional<int64_t> lastTimestampNs) {
         return pImpl->getMessages(id, lastTimestampNs);
+    }
+
+    SendMessageCode ClientWrapper::sendMessage(std::string id, std::string message) {
+        return pImpl->sendMessage(id, message);
+    }
+
+    void ClientWrapper::resetSessionKey() {
+        pImpl->sessionKey = std::nullopt;
+    }
+
+    bool ClientWrapper::shouldReset() {
+        return !pImpl->lastSuccessState;
     }
 }

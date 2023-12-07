@@ -65,6 +65,7 @@
 #include "sslconn.h"
 #include "version.h"
 #include "ipc_pipe.h"
+#include "grpc_client_wrapper.h"
 #include <sys/stat.h>
 
 
@@ -136,22 +137,23 @@ struct SteamBuddy {
 
 
 struct SteamAccount {
-    // libpurple compatibility
+// libpurple compatibility
     PurpleAccount *account;
     PurpleConnection *pc;
 
     // authentication
     std::string username, password;
     std::optional<std::string> steamGuardCode;
-    std::optional<std::string> accessToken, refreshToken;
+    std::optional<std::string> refreshToken;
 
-    std::map<std::string, std::string> cookies;
+//    std::map<std::string, std::string> cookies;
 
     // messaging state for websocket connection
-    int last_message_timestamp;
+    std::map<std::string, int64_t> lastMessageTimestamps;  // TODO: refactor to per-buddy state
 
     // for stub implementation
-    MessagePipe messagePipe;
+//    MessagePipe messagePipe;
+    SteamClient::ClientWrapper client = SteamClient::ClientWrapper("localhost:8080");
     guint poll_callback_id;
 
     // custom memory allocator
