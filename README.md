@@ -1,16 +1,10 @@
-## Resources
+# pidgin-steam: Steam plugin for Pidgin
 
-* [Pidgin development FAQ](https://pidgin.im/development/faq/)
-    * [Qt bindings for libpurple](https://github.com/gatlin/QPurple)
-        Sadly very old, last commit is 10 years ago
-    * [LINE client written in C++](https://github.com/supersonictw/purple-line/tree/master/libpurple)
-* Protobufs:
-    * [Protobuf tutorial for Python](https://protobuf.dev/getting-started/pythontutorial/)
-    * https://dev.to/techschoolguru/protocol-buffer-deep-dive-52d9
-	* [Protobuf for TypeScript](https://dev.to/devaddict/use-grpc-with-node-js-and-typescript-3c58)
-* Steam
-    * **[Node.js implementation of Steam client](https://github.com/DoctorMcKay/node-steam-user)**
+WIP. Intended to replace the now defunct https://github.com/EionRobb/pidgin-opensteamworks.
 
+This branch consists of:
+* Node.js server: `nodejs/src`, gRPC server as proxy to https://github.com/DoctorMcKay/node-steam-user/
+* C++ Pidgin plugin `src`: gRPC client, currently synchronous
 
 ## Build
 
@@ -19,9 +13,54 @@ Dependencies:
 * protobuf
   * protoc
 
+Run Node.js server:
+
+```shell
+cd nodejs
+npm install
+npm run protobuild
+npm run start
 ```
-buf generate
+
+Build Pidgin plugin:
+```shell
+which protoc  # needs to be available in PATH
+cmake --build cmake-build-debug --target pidgin_steam
+mv ./cmake-build-debug/libpidgin_steam.so ~/.purple/plugins/
 ```
+
+Run pidgin:
+```shell
+/usr/bin/pidgin -d
+```
+
+## TODO
+
+- [ ] make gRPC client asynchronous, e.g. with cppcoro
+- [ ] More robust handling of gRPC errors
+- [ ] cleanups
+  - [ ] better build system?
+  - [ ] reduce logging
+- [ ] implement Steam protocol, eliminate Node.js server
+  - [ ] CM server requests
+  - [ ] websockets
+  - [ ] encryption
+  - [ ] Steam protobufs
+  - [ ] Steam protocol
+
+## Resources
+
+* [Pidgin development FAQ](https://pidgin.im/development/faq/)
+  * [Qt bindings for libpurple](https://github.com/gatlin/QPurple)
+    Sadly very old, last commit is 10 years ago
+  * [LINE client written in C++](https://github.com/supersonictw/purple-line/tree/master/libpurple)
+* Protobufs:
+  * [Protobuf tutorial for Python](https://protobuf.dev/getting-started/pythontutorial/)
+  * https://dev.to/techschoolguru/protocol-buffer-deep-dive-52d9
+  * [Protobuf for TypeScript](https://dev.to/devaddict/use-grpc-with-node-js-and-typescript-3c58)
+* Steam
+  * **[Node.js implementation of Steam client](https://github.com/DoctorMcKay/node-steam-user)**
+
 
 ### Protobuf
 
