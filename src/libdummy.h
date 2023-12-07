@@ -178,7 +178,7 @@ struct SteamBuddy {
     std::string avatar;
     guint personastateflags;
 
-    std::string gameid;
+    std::optional<int> gameid;
     std::string gameextrainfo;
     std::string gameserversteamid;
     std::string lobbysteamid;

@@ -311,14 +311,16 @@ function messageRoute(router: ConnectRouter) {
             // https://stackoverflow.com/questions/48011353/how-to-unwrap-the-type-of-a-promise
             type FriendMessageArray = ReturnType<SteamChatRoomClient['getFriendMessageHistory']> extends Promise<{ messages: infer U, more_available: boolean } > ? U : never;
             const allMessages: FriendMessageArray = [];
+            var startTime = call.startTimestamp?.toDate();
             var lastTime = call.lastTimestamp?.toDate();
             for (var i = 0; i < 10; ++i) {
                 console.log("lastTime", lastTime)
                 let { messages, more_available } = await client.chat.getFriendMessageHistory(steamId, {
+                    startTime: startTime,
                     lastTime: lastTime,
                 });
                 console.log("more_available", more_available);
-                allMessages.push(...messages);
+                allMessages.push(...messages.filter((message) => message.server_timestamp.getTime() > (call.startTimestamp?.toDate().getTime() || 0)));
                 if (!more_available) {
                     break;
                 }
@@ -385,6 +387,7 @@ function messageRoute(router: ConnectRouter) {
             }
 
             return new FriendsListResponse({
+                user: makePersona(client.steamID!.getSteamID64(), SteamUser.EFriendRelationship.RequestInitiator),
                 friends: Object.entries(client.myFriends).map(([steamId, relationship]) => {
                     try {
                         return makePersona(steamId, relationship);
@@ -393,7 +396,7 @@ function messageRoute(router: ConnectRouter) {
                         console.error(ex);
                         return undefined;
                     }
-                }).filter((persona) => persona !== undefined) as Persona[],
+                }).filter((persona) => persona !== undefined && persona.id != client.steamID?.getSteamID64()) as Persona[],
             });
         }
     });

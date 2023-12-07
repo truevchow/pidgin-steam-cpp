@@ -51,13 +51,13 @@ static gchar *steam_status_text(PurpleBuddy *buddy) {
     purple_debug_info("dummy", "steam_status_text start\n");
     auto *sbuddy = static_cast<SteamBuddy *>(buddy->proto_data);
     if (sbuddy && !sbuddy->gameextrainfo.empty()) {
-        if (!sbuddy->gameid.empty()) {
+        if (sbuddy->gameid.has_value()) {
             return g_markup_printf_escaped("In game %s", sbuddy->gameextrainfo.c_str());
         } else {
             return g_markup_printf_escaped("In non-Steam game %s", sbuddy->gameextrainfo.c_str());
         }
     }
-    return g_markup_printf_escaped("Not implemented [steam_status_text]");  // TODO
+    return NULL;
 }
 
 static void steam_close(PurpleConnection *pc) {
@@ -67,47 +67,106 @@ static void steam_close(PurpleConnection *pc) {
     delete sa;
 }
 
+static const gchar* steam_personastate_to_statustype(gint64 state) {
+    const char *status_id;
+    PurpleStatusPrimitive prim;
+    switch (state) {
+        default:
+        case 0: //Offline
+            prim = PURPLE_STATUS_OFFLINE;
+            break;
+        case 1: //Online
+            prim = PURPLE_STATUS_AVAILABLE;
+            break;
+        case 2: //Busy
+            prim = PURPLE_STATUS_UNAVAILABLE;
+            break;
+        case 3: //Away
+            prim = PURPLE_STATUS_AWAY;
+            break;
+        case 4: //Snoozing
+            prim = PURPLE_STATUS_EXTENDED_AWAY;
+            break;
+        case 5: //Looking to trade
+            return "trade";
+        case 6: //Looking to play
+            return "play";
+    }
+    status_id = purple_primitive_get_id_from_type(prim);
+    return status_id;
+}
+
 void receive_messages(SteamAccount &sa) {
+    std::optional<int64_t> lastTimestampNs;
     auto friendsList = sa.client.getFriendsList();  // TODO: store in SteamAccount
-    for (auto &x: friendsList) {
-        std::optional<int> lastTimestampNs;
-        if (auto it = sa.lastMessageTimestamps.find(x.id); it != sa.lastMessageTimestamps.end()) {
-            lastTimestampNs = it->second;
+    int max_iterations = 3;
+    for (auto &x: friendsList.buddies) {
+        if (!purple_find_buddy(sa.account, x.id.c_str())) {
+            purple_debug_info("dummy", "steam_send_im %s add buddy %s\n", sa.account->username, x.id.c_str());
+            auto buddy = purple_buddy_new(sa.account, x.id.c_str(), nullptr);
+            buddy->proto_data = new SteamBuddy{&sa, buddy, x.id, x.nickname, "", "", 0, "", 0};
+            purple_blist_add_buddy(buddy, nullptr, purple_find_group("Steam"), nullptr);
+            //            g_string_append_c(users_to_update, ',');
+            //            g_string_append(users_to_update, steamid);
         }
-        auto messages = sa.client.getMessages(x.id, lastTimestampNs);
-        for (auto &msg: messages) {
-            purple_debug_info("dummy", "steam_send_im received %s\n", msg.message.c_str());
-//        if (real_timestamp > sa->last_message_timestamp)
-//        {
-            gchar *text, *html;
-//            const gchar *from;
-//            if (g_str_equal(type, "emote") || g_str_equal(type, "my_emote"))
-//            {
-//                text = g_strconcat("/me ", json_object_get_string_member(message, "text"), NULL);
-//            } else {
-//                text = g_strdup(json_object_get_string_member(message, "text"));
-//            }
-            html = purple_markup_escape_text(msg.message.c_str(), -1);  // TODO: input is BBCode
-//            from = json_object_get_string_member(message, "steamid_from");
-//        if (g_str_has_prefix(type, "my_")) {
-            auto from = x.id;
-            PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, from.c_str(),
-                                                                             sa.account);
-            purple_debug_info("dummy", "steam_send_im resolve conv %p\n", conv);
-            if (conv == NULL) {
-                conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, sa.account, from.c_str());
-                purple_debug_info("dummy", "steam_send_im make new conv %p\n", conv);
+        purple_debug_info("dummy", "steam_send_im %s update buddy %s %s\n", sa.account->username, x.id.c_str(), x.nickname.c_str());
+        purple_serv_got_private_alias(sa.pc, x.id.c_str(), x.nickname.c_str());
+        purple_prpl_got_user_status(sa.account, x.id.c_str(), steam_personastate_to_statustype(x.personaState), NULL);
+        auto buddy = static_cast<PurpleBuddy *>(purple_find_buddy(sa.account, x.id.c_str()));
+        if (buddy->proto_data == nullptr) {
+            buddy->proto_data = new SteamBuddy{&sa, buddy, x.id, x.nickname, "", "", 0, "", 0};
+        }
+        auto sbuddy = static_cast<SteamBuddy*>(buddy->proto_data);  // TODO
+        sbuddy->gameextrainfo = x.gameExtraInfo;
+        sbuddy->gameid = x.gameid;
+
+        auto otherId = x.id;
+        PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, otherId.c_str(),
+                                                                         sa.account);
+
+        for (int i = 0; i < max_iterations; ++i) {
+            std::optional<int64_t> startTimestampNs;
+            if (auto it = sa.lastMessageTimestamps.find(x.id); it != sa.lastMessageTimestamps.end()) {
+                startTimestampNs = it->second;
             }
-            purple_conversation_write(conv, from.c_str(), html, PURPLE_MESSAGE_RECV, msg.timestamp_ns / 1000000000LL);
-//        } else {
-//            serv_got_im(sa.pc, from, html, PURPLE_MESSAGE_RECV, real_timestamp);
-//        }
+            auto messages = sa.client.getMessages(x.id, startTimestampNs, lastTimestampNs);
+            if (messages.empty()) {
+                break;
+            }
+            for (auto &msg: messages) {
+                purple_debug_info("dummy", "steam_send_im received %s\n", msg.message.c_str());
+    //        if (real_timestamp > sa->last_message_timestamp)
+    //        {
+                gchar *text, *html;
+    //            const gchar *otherId;
+    //            if (g_str_equal(type, "emote") || g_str_equal(type, "my_emote"))
+    //            {
+    //                text = g_strconcat("/me ", json_object_get_string_member(message, "text"), NULL);
+    //            } else {
+    //                text = g_strdup(json_object_get_string_member(message, "text"));
+    //            }
+                html = purple_markup_escape_text(msg.message.c_str(), -1);  // TODO: input is BBCode
+    //            otherId = json_object_get_string_member(message, "steamid_from");
+    //        if (g_str_has_prefix(type, "my_")) {
+                purple_debug_info("dummy", "steam_send_im resolve conv %p\n", conv);
+                if (conv == NULL) {
+                    conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, sa.account, otherId.c_str());
+                    purple_debug_info("dummy", "steam_send_im make new conv %p\n", conv);
+                }
+                purple_conversation_write(conv, otherId.c_str(), html,
+                                          msg.senderId == friendsList.me->id ? PURPLE_MESSAGE_SEND : PURPLE_MESSAGE_RECV,
+                                          msg.timestamp_ns / 1000000000LL);
+    //        } else {
+    //            serv_got_im(sa.pc, otherId, html, PURPLE_MESSAGE_RECV, real_timestamp);
+    //        }
 
-            purple_debug_info("dummy", "steam_send_im done\n");
-            g_free(html);
-//        g_free(text);
+                purple_debug_info("dummy", "steam_send_im done\n");
+                g_free(html);
+    //        g_free(text);
 
-            sa.lastMessageTimestamps[x.id] = msg.timestamp_ns + 1;
+                lastTimestampNs = std::min(msg.timestamp_ns, lastTimestampNs.value_or(msg.timestamp_ns));
+                sa.lastMessageTimestamps[x.id] = msg.timestamp_ns + 1;
+            }
         }
     }
     write_last_timestamps(sa);
@@ -128,8 +187,7 @@ static gint steam_send_im(PurpleConnection *pc, const gchar *who, const gchar *m
     purple_debug_info("dummy", "steam_send_im with %s %s\n", who, msg);
     switch (sa.client.sendMessage(who, msg)) {
         case SteamClient::SEND_SUCCESS:
-            receive_messages(sa);
-            return 1;
+            return 0;
         case SteamClient::SEND_INVALID_SESSION_KEY:
             purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
                                            "Invalid session key");
@@ -152,6 +210,8 @@ static gint steam_send_im(PurpleConnection *pc, const gchar *who, const gchar *m
 
 static void steam_buddy_free(PurpleBuddy *buddy) {
     purple_debug_info("dummy", "steam_buddy_free start\n");
+    delete static_cast<SteamBuddy *>(buddy->proto_data);
+    buddy->proto_data = nullptr;
 }
 
 #if PURPLE_VERSION_CHECK(3, 0, 0)

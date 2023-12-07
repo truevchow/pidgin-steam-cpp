@@ -32,7 +32,8 @@ message SendMessageResult {
 message PollRequest {
     string targetId = 1;
     string sessionKey = 2;
-    optional google.protobuf.Timestamp lastTimestamp = 3;
+    optional google.protobuf.Timestamp startTimestamp = 3;
+    optional google.protobuf.Timestamp lastTimestamp = 4;
 }
 
 message ResponseMessage {
@@ -63,5 +64,6 @@ message Persona {
 }
 
 message FriendsListResponse {
-    repeated Persona friends = 1;
+    Persona user = 1;
+    repeated Persona friends = 2;
 }

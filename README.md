@@ -14,6 +14,11 @@
 
 ## Build
 
+Dependencies:
+* CMake
+* protobuf
+  * protoc
+
 ```
 buf generate
 ```

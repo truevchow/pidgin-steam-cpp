@@ -89,7 +89,7 @@ namespace SteamClient {
             return state;
         }
 
-        std::vector<Buddy> getFriendsList() {
+        FriendsList getFriendsList() {
             steam::FriendsListRequest request;
             request.set_sessionkey(sessionKey.value());
 
@@ -99,7 +99,7 @@ namespace SteamClient {
             if (!status.ok()) {
                 std::cout << "GetFriendsList failed (gRPC failure)" << std::endl;
                 std::cout << status.error_code() << ": " << status.error_message() << std::endl;
-                return {};
+                return {std::nullopt, {}};
             }
 //        if (!response.success()) {
 //            std::cout << "GetFriendsList failed (Steam failure): " << response.reasonstr() << std::endl;
@@ -109,21 +109,29 @@ namespace SteamClient {
             std::cout << "Friends: " << response.friends_size() << std::endl;
             std::vector<Buddy> friends;
             for (auto &x: response.friends()) {
-                friends.push_back({x.name(), x.id()});
+                friends.push_back({x.name(), x.id(), (PersonaState)(int)x.personastate()});
             }
-            return friends;
+            auto me = response.user();
+            return {std::optional<Buddy>({me.name(), me.id(), (PersonaState)(int)me.personastate()}), friends};
         }
 
-        std::vector<Message> getMessages(std::string id, std::optional<int64_t> lastTimestampNs = std::nullopt) {
+        static google::protobuf::Timestamp* set_timestamp_protobuf(google::protobuf::Timestamp *timestamp, int64_t timestamp_ns) {
+            timestamp->set_seconds(timestamp_ns / 1000000000LL);  // Convert nanoseconds to seconds
+            timestamp->set_nanos(timestamp_ns % 1000000000LL);  // Get remaining nanoseconds
+            return timestamp;
+        }
+
+        std::vector<Message> getMessages(std::string id, std::optional<int64_t> startTimestampNs = std::nullopt, std::optional<int64_t> lastTimestampNs = std::nullopt) {
             steam::PollRequest request;
             request.set_sessionkey(sessionKey.value());
             request.set_targetid(id);
-            if (lastTimestampNs.has_value()) {
-                int64_t &val = lastTimestampNs.value();
+            if (startTimestampNs.has_value()) {
                 auto *timestamp = new google::protobuf::Timestamp();
-                timestamp->set_seconds(val / 1000000000LL);  // Convert nanoseconds to seconds
-                timestamp->set_nanos(val % 1000000000LL);  // Get remaining nanoseconds
-                request.set_allocated_lasttimestamp(timestamp);
+                request.set_allocated_starttimestamp(set_timestamp_protobuf(timestamp, startTimestampNs.value()));
+            }
+            if (lastTimestampNs.has_value()) {
+                auto *timestamp = new google::protobuf::Timestamp();
+                request.set_allocated_lasttimestamp(set_timestamp_protobuf(timestamp, lastTimestampNs.value()));
             }
             grpc::ClientContext context;
             auto clientReader = messageStub->PollChatMessages(&context, request);
@@ -180,12 +188,12 @@ namespace SteamClient {
         return pImpl->authenticate(username, password, steamGuardCode);
     }
 
-    std::vector<Buddy> ClientWrapper::getFriendsList() {
+    FriendsList ClientWrapper::getFriendsList() {
         return pImpl->getFriendsList();
     }
 
-    std::vector<Message> ClientWrapper::getMessages(std::string id, std::optional<int64_t> lastTimestampNs) {
-        return pImpl->getMessages(id, lastTimestampNs);
+    std::vector<Message> ClientWrapper::getMessages(std::string id, std::optional<int64_t> startTimestampNs, std::optional<int64_t> lastTimestampNs) {
+        return pImpl->getMessages(id, startTimestampNs, lastTimestampNs);
     }
 
     SendMessageCode ClientWrapper::sendMessage(std::string id, std::string message) {

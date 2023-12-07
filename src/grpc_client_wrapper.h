@@ -13,9 +13,21 @@
 #include <memory>
 
 namespace SteamClient {
+    enum PersonaState: int {
+        OFFLINE = 0,
+        ONLINE = 1,
+        BUSY = 2,
+        AWAY = 3,
+        SNOOZE = 4,
+        LOOKING_TO_TRADE = 5,
+        LOOKING_TO_PLAY = 6,
+        INVISIBLE = 7,
+    };
+
     struct Buddy {
         std::string nickname;
         std::string id;
+        PersonaState personaState;
 
         // rich presence
         std::optional<int> gameid;
@@ -43,6 +55,11 @@ namespace SteamClient {
         SEND_INVALID_MESSAGE
     };
 
+    struct FriendsList {
+        std::optional<Buddy> me;
+        std::vector<Buddy> buddies;
+    };
+
     class ClientWrapper {
         struct impl;
         std::unique_ptr<impl> pImpl;
@@ -54,9 +71,9 @@ namespace SteamClient {
 
         AuthResponseState authenticate(std::string username, std::string password, std::optional<std::string> steamGuardCode);
 
-        std::vector<Buddy> getFriendsList();
+        FriendsList getFriendsList();
 
-        std::vector<Message> getMessages(std::string id, std::optional<int64_t> lastTimestampNs = std::nullopt);
+        std::vector<Message> getMessages(std::string id, std::optional<int64_t> startTimestampNs = std::nullopt, std::optional<int64_t> lastTimestampNs = std::nullopt);
 
         SendMessageCode sendMessage(std::string id, std::string message);
 
