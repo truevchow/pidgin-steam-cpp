@@ -226,7 +226,7 @@ reader.loadLoginData().then(async (loginData) => {
 			console.debug("polling")
 			var steamGuardMachineToken = await genericPrompt('Steam Guard machine token');
 			console.log(`Submitting Steam Guard machine token: ${steamGuardMachineToken}`);
-			session.submitSteamGuardCode(steamGuardMachineToken);
+			await session.submitSteamGuardCode(steamGuardMachineToken);
 		});
 
 		session.on('authenticated', async () => {
@@ -281,7 +281,7 @@ reader.loadLoginData().then(async (loginData) => {
 					switch (type) {
 						case EAuthSessionGuardType.EmailCode:
 							console.log(`A login code has been sent to your email address at ${detail}`);
-							code = await genericPrompt('Code: ');
+							code = await genericPrompt('Code');
 							if (code) {
 								await session.submitSteamGuardCode(code);
 							}
@@ -289,7 +289,7 @@ reader.loadLoginData().then(async (loginData) => {
 
 						case EAuthSessionGuardType.DeviceCode:
 							console.log('You may confirm this login by providing a Steam Guard Mobile Authenticator code');
-							code = await genericPrompt('Code: ');
+							code = await genericPrompt('Code');
 							if (code) {
 								await session.submitSteamGuardCode(code);
 							}
@@ -447,13 +447,32 @@ client.on('webSession', function (sessionID, cookies) {
 		function formatMessage(message): string {
 			return `[${message.server_timestamp}] ${getUser(message.sender || message.steamid_friend)?.player_name}: ${message.message_bbcode_parsed}`;
 		} 
+		function writeStringToFile(val: string) {
+			console.log("writeStringToFile", val);
+			const len = Buffer.byteLength(val, 'utf8');
+			// Create a buffer with space for the length and the data
+			const buf = Buffer.alloc(4 + len);
+			buf.writeUInt32LE(len, 0);
+			buf.write(val, 4, len, 'utf8');
+			console.log("Wrote buffer", buf.length);
+			// Append to a normal file
+			fs.appendFileSync("/tmp/basic_steam_recv.txt", buf);
+		}
+
+
 		client.chat.on('friendMessage', (message) => {
 			console.log(formatMessage(message));
+			writeStringToFile(formatMessage(message));
 		});
 
 		// getChatHistoryVerbose(target);
 		const session = friendSessions[target];
 		console.log("Getting chat history for friend", target, getUser(target)?.player_name);
+
+		// Create a writable stream for the output pipe
+		// const recvMessagePipePath = '/tmp/basic_steam_recv.pipe';
+		// const recvPipe = fs.openSync(recvMessagePipePath, 'w');
+
 		await (client.chat.getFriendMessageHistory(target, {
 			startTime: (session?.time_last_message || Date.now()) - 1000 * 60 * 60 * 24 * 1, // 1 day ago
 			maxCount: 50,
@@ -462,7 +481,9 @@ client.on('webSession', function (sessionID, cookies) {
 			// console.log("More available:", more_available);
 			messages.sort((a, b) => Number(a.server_timestamp) - Number(b.server_timestamp));
 			for (let message of messages) {
-				console.log(formatMessage(message));
+				const val = formatMessage(message);
+				console.log(val);
+				writeStringToFile(val);
 			}
 		}).catch((err) => {
 			console.log("Error getting chat history:", err);
@@ -470,16 +491,57 @@ client.on('webSession', function (sessionID, cookies) {
 		}))
 
 		// Wait for user input from stdin
-		while (true) {
-			const input = await genericPrompt('> ', undefined, false);
-			if (input === '/exit') {
-				break;
-			}
-			sendMessageWithDelay(target, input, 0);
-		}
+		// while (true) {
+		// 	const input = await genericPrompt('> ', undefined, false);
+		// 	if (input === '/exit') {
+		// 		break;
+		// 	}
+		// 	sendMessageWithDelay(target, input, 0);
+		// }
 
-		console.log("Done, logging off");
-		client.logOff();
+		// Read null-terminated message strings from a named pipe and send them using sendMessageWithDelay
+		const sendMessagePipePath = "/tmp/basic_steam_send.pipe"  // a named pipe
+		const sendPipe = fs.createReadStream(sendMessagePipePath, { highWaterMark: 65536 });
+		let bufferStr = '';
+		sendPipe.on('data', (data: Buffer) => {
+			bufferStr += data.toString('utf8');
+			let buffer = Buffer.from(bufferStr, 'utf8');
+			let pos = 0;
+			console.log("Source:", bufferStr);
+			while (pos < buffer.length) {
+				// Read the length as a uint32_t
+				const len = buffer.readUInt32LE(pos);
+				pos += 4;
+
+				// Read the data as a string
+				const val = buffer.toString('utf8', pos, pos + len);
+				pos += len;
+
+				// Handle the message
+				console.log("Send message:", val);
+				console.log("Send message length:", len);
+				console.log("Stream pos", pos, "buffer length", buffer.length, "source length", bufferStr.length);
+				sendMessageWithDelay(target, val.toString(), 0);
+			}
+			bufferStr = "";
+			console.log("Done reading data");
+			// const messages = buffer.split('\0');
+			// buffer = messages.pop() || '';
+			// for (const message of messages) {
+			// 	sendMessageWithDelay(target, message, 0);
+			// }
+		});
+		sendPipe.on('error', (err: Error) => {
+			console.error(`Error reading from named pipe ${sendMessagePipePath}:`, err);
+		});
+
+		// Intercept Ctrl+C in the terminal and log off the client on the interrupt
+		process.on('SIGINT', () => {
+			console.log('Received interrupt signal, logging off');
+			client.logOff();
+			// exit
+			process.exit(0);
+		});
 	})();
 });
 

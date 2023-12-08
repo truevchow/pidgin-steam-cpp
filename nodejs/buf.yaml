@@ -1,0 +1,10 @@
+version: v1beta1
+build:
+  roots:
+    - src/protobufs_src/comm_protobufs
+lint:
+  use:
+    - DEFAULT
+breaking:
+  use:
+    - WIRE_JSON

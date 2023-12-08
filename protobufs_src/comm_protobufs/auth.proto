@@ -1,0 +1,50 @@
+syntax = "proto3";
+// import "google/protobuf/descriptor.proto";
+package steam;
+// TODO: use JWT to secure gRPC communication
+
+// Authentication Service
+service AuthService {
+    rpc Authenticate(AuthRequest) returns (AuthResponse);
+}
+
+// Polling Service
+// service PollService {
+//     rpc PollMessages(PollRequest) returns (stream PollResponse);
+// }
+
+message AuthRequest {
+    string username = 1;
+    string password = 2;
+    optional string steamGuardCode = 3;
+    optional string sessionKey = 4;  // identifies session for e.g. Steam Guard token
+    optional string refreshToken = 5;  // preferred to username/password
+}
+
+
+
+message AuthResponse {
+    enum AuthState {
+        SUCCESS = 0;
+        INVALID_CREDENTIALS = 1;
+        STEAM_GUARD_CODE_REQUEST = 2;
+    }
+
+    bool success = 1;
+    AuthState reason = 2;
+    string sessionKey = 3;  // identifies session for e.g. Steam Guard token
+    string reasonStr = 4;
+    optional string refreshToken = 5;
+    // AuthState reason = 3 [json_name = "reason"];
+    // option (google.protobuf.json_format.field_options) = {
+    //     json_name: "reason"
+    // };
+}
+
+// message PollRequest {
+//     string username = 1;
+// }
+
+// message PollResponse {
+//     string message = 1;
+// }
