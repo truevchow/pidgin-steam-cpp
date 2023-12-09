@@ -75,6 +75,10 @@ https://stackoverflow.com/questions/52533396/cmake-cant-find-protobuf-protobuf-g
 
 Not that many functions immediately in libpurple plugin instantiation:
 
+[gRPC streaming client](https://stackoverflow.com/questions/71909245/how-to-use-grpc-c-clientasyncreadermessage-for-server-side-streams)
+
+#### libpurple
+
 ```cpp
 	steam_list_icon,           /* list_icon */
 	steam_list_emblem,         /* list_emblems */
