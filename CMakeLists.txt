@@ -34,10 +34,14 @@ add_library(grpc_wrapper
         ${PROTO_IMPORT_FILES}
         src/grpc_client_wrapper.cpp src/grpc_client_wrapper.h
         ${PROTO_GEN_FILES}
+        src/grpc_client_wrapper_async.cpp
+        src/grpc_client_wrapper_async.h
+        ${CPPCORO_INCLUDE_DIR}
 )
 target_link_libraries(grpc_wrapper
         ${Protobuf_LIBRARIES}
         gRPC::grpc++
+        cppcoro
 )
 set_target_properties(grpc_wrapper PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -56,6 +60,7 @@ add_executable(grpc_experiment
 target_link_libraries(grpc_experiment
         #        ${LIBPURPLE_LIBRARIES}
         cppcoro
+        jsoncpp_lib
         grpc_wrapper
 )
 
