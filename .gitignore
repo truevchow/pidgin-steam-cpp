@@ -48,3 +48,8 @@ cmake-build-debug
 
 # CLion
 .idea
+
+# Protobufs
+protobufs/
+*.pb.cc
+*.pb.h
