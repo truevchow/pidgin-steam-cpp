@@ -49,7 +49,7 @@ target_include_directories(grpc_wrapper PUBLIC
 #        "${PROTO_GEN_DIR}")
 
 add_executable(grpc_experiment
-        src/grpc_exp.cpp
+        src/grpc_exp.cpp src/environ.cpp src/environ.h
         src/grpc_client_wrapper.h
         #        ${PROTO_SRCS} ${PROTO_HDRS}
 )

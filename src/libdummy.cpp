@@ -57,7 +57,7 @@ static gchar *steam_status_text(PurpleBuddy *buddy) {
             return g_markup_printf_escaped("In non-Steam game %s", sbuddy->gameextrainfo.c_str());
         }
     }
-    return NULL;
+    return nullptr;
 }
 
 static void steam_close(PurpleConnection *pc) {
@@ -112,7 +112,7 @@ void receive_messages(SteamAccount &sa) {
         purple_debug_info("dummy", "steam_send_im %s update buddy %s %s\n", sa.account->username, x.id.c_str(),
                           x.nickname.c_str());
         purple_serv_got_private_alias(sa.pc, x.id.c_str(), x.nickname.c_str());
-        purple_prpl_got_user_status(sa.account, x.id.c_str(), steam_personastate_to_statustype(x.personaState), NULL);
+        purple_prpl_got_user_status(sa.account, x.id.c_str(), steam_personastate_to_statustype(x.personaState), nullptr);
         auto buddy = static_cast<PurpleBuddy *>(purple_find_buddy(sa.account, x.id.c_str()));
         if (buddy->proto_data == nullptr) {
             buddy->proto_data = new SteamBuddy{&sa, buddy, x.id, x.nickname, "", "", 0, "", 0};
@@ -142,7 +142,7 @@ void receive_messages(SteamAccount &sa) {
                 //            const gchar *otherId;
                 //            if (g_str_equal(type, "emote") || g_str_equal(type, "my_emote"))
                 //            {
-                //                text = g_strconcat("/me ", json_object_get_string_member(message, "text"), NULL);
+                //                text = g_strconcat("/me ", json_object_get_string_member(message, "text"), nullptr);
                 //            } else {
                 //                text = g_strdup(json_object_get_string_member(message, "text"));
                 //            }
@@ -150,7 +150,7 @@ void receive_messages(SteamAccount &sa) {
                 //            otherId = json_object_get_string_member(message, "steamid_from");
                 //        if (g_str_has_prefix(type, "my_")) {
                 purple_debug_info("dummy", "steam_send_im resolve conv %p\n", conv);
-                if (conv == NULL) {
+                if (conv == nullptr) {
                     conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, sa.account, otherId.c_str());
                     purple_debug_info("dummy", "steam_send_im make new conv %p\n", conv);
                 }
