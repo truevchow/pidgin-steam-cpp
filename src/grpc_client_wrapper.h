@@ -1,7 +1,3 @@
-//
-// Created by vincent on 3/12/23.
-//
-
 #ifndef PIDGIN_STEAM_GRPC_EXP_H
 #define PIDGIN_STEAM_GRPC_EXP_H
 
@@ -13,7 +9,7 @@
 #include <memory>
 
 namespace SteamClient {
-    enum PersonaState: int {
+    enum PersonaState : int {
         OFFLINE = 0,
         ONLINE = 1,
         BUSY = 2,
@@ -65,17 +61,19 @@ namespace SteamClient {
         std::unique_ptr<impl> pImpl;
 
     public:
-        explicit ClientWrapper(const std::string& url);
+        explicit ClientWrapper(const std::string &url);
 
         ~ClientWrapper();
 
-        AuthResponseState authenticate(const std::string& username, const std::string& password, const std::optional<std::string>& steamGuardCode);
+        AuthResponseState authenticate(const std::string &username, const std::string &password,
+                                       const std::optional<std::string> &steamGuardCode);
 
         FriendsList getFriendsList();
 
-        std::vector<Message> getMessages(const std::string& id, std::optional<int64_t> startTimestampNs = std::nullopt, std::optional<int64_t> lastTimestampNs = std::nullopt);
+        std::vector<Message> getMessages(const std::string &id, std::optional<int64_t> startTimestampNs = std::nullopt,
+                                         std::optional<int64_t> lastTimestampNs = std::nullopt);
 
-        SendMessageCode sendMessage(const std::string& id, const std::string& message);
+        SendMessageCode sendMessage(const std::string &id, const std::string &message);
 
         void resetSessionKey();
 

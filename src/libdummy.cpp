@@ -1,12 +1,12 @@
 // From https://github.com/EionRobb/pidgin-opensteamworks/blob/master/steam-mobile/libsteam.c
 #include "libdummy.h"
-
-static constexpr bool core_is_haze = false;
-
 #include <stdexcept>
 #include <json/value.h>
 #include <json/reader.h>
 #include <json/writer.h>
+
+
+static constexpr bool core_is_haze = false;
 
 
 bool read_last_timestamps(SteamAccount &sa) {
@@ -67,7 +67,7 @@ static void steam_close(PurpleConnection *pc) {
     delete sa;
 }
 
-static const gchar* steam_personastate_to_statustype(gint64 state) {
+static const gchar *steam_personastate_to_statustype(gint64 state) {
     const char *status_id;
     PurpleStatusPrimitive prim;
     switch (state) {
@@ -109,14 +109,15 @@ void receive_messages(SteamAccount &sa) {
             //            g_string_append_c(users_to_update, ',');
             //            g_string_append(users_to_update, steamid);
         }
-        purple_debug_info("dummy", "steam_send_im %s update buddy %s %s\n", sa.account->username, x.id.c_str(), x.nickname.c_str());
+        purple_debug_info("dummy", "steam_send_im %s update buddy %s %s\n", sa.account->username, x.id.c_str(),
+                          x.nickname.c_str());
         purple_serv_got_private_alias(sa.pc, x.id.c_str(), x.nickname.c_str());
         purple_prpl_got_user_status(sa.account, x.id.c_str(), steam_personastate_to_statustype(x.personaState), NULL);
         auto buddy = static_cast<PurpleBuddy *>(purple_find_buddy(sa.account, x.id.c_str()));
         if (buddy->proto_data == nullptr) {
             buddy->proto_data = new SteamBuddy{&sa, buddy, x.id, x.nickname, "", "", 0, "", 0};
         }
-        auto sbuddy = static_cast<SteamBuddy*>(buddy->proto_data);  // TODO
+        auto sbuddy = static_cast<SteamBuddy *>(buddy->proto_data);  // TODO
         sbuddy->gameextrainfo = x.gameExtraInfo;
         sbuddy->gameid = x.gameid;
 
@@ -135,34 +136,35 @@ void receive_messages(SteamAccount &sa) {
             }
             for (auto &msg: messages) {
                 purple_debug_info("dummy", "steam_send_im received %s\n", msg.message.c_str());
-    //        if (real_timestamp > sa->last_message_timestamp)
-    //        {
+                //        if (real_timestamp > sa->last_message_timestamp)
+                //        {
                 gchar *text, *html;
-    //            const gchar *otherId;
-    //            if (g_str_equal(type, "emote") || g_str_equal(type, "my_emote"))
-    //            {
-    //                text = g_strconcat("/me ", json_object_get_string_member(message, "text"), NULL);
-    //            } else {
-    //                text = g_strdup(json_object_get_string_member(message, "text"));
-    //            }
+                //            const gchar *otherId;
+                //            if (g_str_equal(type, "emote") || g_str_equal(type, "my_emote"))
+                //            {
+                //                text = g_strconcat("/me ", json_object_get_string_member(message, "text"), NULL);
+                //            } else {
+                //                text = g_strdup(json_object_get_string_member(message, "text"));
+                //            }
                 html = purple_markup_escape_text(msg.message.c_str(), -1);  // TODO: input is BBCode
-    //            otherId = json_object_get_string_member(message, "steamid_from");
-    //        if (g_str_has_prefix(type, "my_")) {
+                //            otherId = json_object_get_string_member(message, "steamid_from");
+                //        if (g_str_has_prefix(type, "my_")) {
                 purple_debug_info("dummy", "steam_send_im resolve conv %p\n", conv);
                 if (conv == NULL) {
                     conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, sa.account, otherId.c_str());
                     purple_debug_info("dummy", "steam_send_im make new conv %p\n", conv);
                 }
                 purple_conversation_write(conv, otherId.c_str(), html,
-                                          msg.senderId == friendsList.me->id ? PURPLE_MESSAGE_SEND : PURPLE_MESSAGE_RECV,
+                                          msg.senderId == friendsList.me->id ? PURPLE_MESSAGE_SEND
+                                                                             : PURPLE_MESSAGE_RECV,
                                           msg.timestamp_ns / 1000000000LL);
-    //        } else {
-    //            serv_got_im(sa.pc, otherId, html, PURPLE_MESSAGE_RECV, real_timestamp);
-    //        }
+                //        } else {
+                //            serv_got_im(sa.pc, otherId, html, PURPLE_MESSAGE_RECV, real_timestamp);
+                //        }
 
                 purple_debug_info("dummy", "steam_send_im done\n");
                 g_free(html);
-    //        g_free(text);
+                //        g_free(text);
 
                 lastTimestampNs = std::min(msg.timestamp_ns, lastTimestampNs.value_or(msg.timestamp_ns));
                 sa.lastMessageTimestamps[x.id] = msg.timestamp_ns + 1;

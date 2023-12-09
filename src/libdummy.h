@@ -35,19 +35,6 @@
 #	include <sys/socket.h>
 #endif
 
-//#include <json-glib/json-glib.h>
-//
-//#define json_object_get_int_member(JSON_OBJECT, MEMBER) \
-//	(json_object_has_member(JSON_OBJECT, MEMBER) ? json_object_get_int_member(JSON_OBJECT, MEMBER) : 0)
-//#define json_object_get_string_member(JSON_OBJECT, MEMBER) \
-//	(json_object_has_member(JSON_OBJECT, MEMBER) ? json_object_get_string_member(JSON_OBJECT, MEMBER) : NULL)
-//#define json_object_get_array_member(JSON_OBJECT, MEMBER) \
-//	(json_object_has_member(JSON_OBJECT, MEMBER) ? json_object_get_array_member(JSON_OBJECT, MEMBER) : NULL)
-//#define json_object_get_object_member(JSON_OBJECT, MEMBER) \
-//	(json_object_has_member(JSON_OBJECT, MEMBER) ? json_object_get_object_member(JSON_OBJECT, MEMBER) : NULL)
-//#define json_object_get_boolean_member(JSON_OBJECT, MEMBER) \
-//	(json_object_has_member(JSON_OBJECT, MEMBER) ? json_object_get_boolean_member(JSON_OBJECT, MEMBER) : FALSE)
-
 #ifndef PURPLE_PLUGINS
 #	define PURPLE_PLUGINS
 #endif
@@ -64,7 +51,6 @@
 #include "savedstatuses.h"
 #include "sslconn.h"
 #include "version.h"
-#include "ipc_pipe.h"
 #include "grpc_client_wrapper.h"
 #include <sys/stat.h>
 
@@ -84,8 +70,6 @@
 
 #define STEAM_PLUGIN_ID "prpl-steam-websockets"
 #define STEAM_PLUGIN_VERSION "1.7"
-
-#define STEAM_CAPTCHA_URL "https://steamcommunity.com/public/captcha.php?gid=%s"
 
 #ifdef ORIGINAL_PIDGIN_IMPLEMENTATION
 struct SteamAccount {
@@ -137,7 +121,7 @@ struct SteamBuddy {
 
 
 struct SteamAccount {
-// libpurple compatibility
+    // libpurple compatibility
     PurpleAccount *account;
     PurpleConnection *pc;
 
@@ -152,7 +136,6 @@ struct SteamAccount {
     std::map<std::string, int64_t> lastMessageTimestamps;  // TODO: refactor to per-buddy state
 
     // for stub implementation
-//    MessagePipe messagePipe;
     SteamClient::ClientWrapper client = SteamClient::ClientWrapper("localhost:8080");
     guint poll_callback_id;
 

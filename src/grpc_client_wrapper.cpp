@@ -1,7 +1,3 @@
-//
-// Created by vincent on 3/12/23.
-//
-
 #include "grpc_client_wrapper.h"
 #include <grpcpp/grpcpp.h>
 
@@ -22,13 +18,15 @@ namespace SteamClient {
         bool lastSuccessState = false;
         std::optional<std::string> sessionKey;
 
-        explicit impl(const std::string& url) {
+        explicit impl(const std::string &url) {
             channel = grpc::CreateChannel(url, grpc::InsecureChannelCredentials());
             authStub = steam::AuthService::NewStub(channel);
             messageStub = steam::MessageService::NewStub(channel);
         }
 
-        std::tuple<AuthResponseState, std::string> _authenticate(const std::string &username, const std::string &password, const std::optional<std::string> &steamGuardCode) {
+        std::tuple<AuthResponseState, std::string>
+        _authenticate(const std::string &username, const std::string &password,
+                      const std::optional<std::string> &steamGuardCode) {
             steam::AuthRequest request;
             request.set_username(username);
             request.set_password(password);
@@ -64,7 +62,8 @@ namespace SteamClient {
             }
         }
 
-        AuthResponseState authenticate(const std::string& username, const std::string& password, const std::optional<std::string>& steamGuardCode) {
+        AuthResponseState authenticate(const std::string &username, const std::string &password,
+                                       const std::optional<std::string> &steamGuardCode) {
             auto [state, newSessionKey] = _authenticate(username, password, steamGuardCode);
             this->lastAuthResponseState = state;
             switch (state) {
@@ -104,19 +103,21 @@ namespace SteamClient {
             std::cout << "Friends: " << response.friends_size() << std::endl;
             std::vector<Buddy> friends;
             for (auto &x: response.friends()) {
-                friends.emplace_back(x.name(), x.id(), (PersonaState)(int)x.personastate());
+                friends.emplace_back(x.name(), x.id(), (PersonaState) (int) x.personastate());
             }
             auto me = response.user();
-            return {std::optional<Buddy>({me.name(), me.id(), (PersonaState)(int)me.personastate()}), friends};
+            return {std::optional<Buddy>({me.name(), me.id(), (PersonaState) (int) me.personastate()}), friends};
         }
 
-        static google::protobuf::Timestamp* set_timestamp_protobuf(google::protobuf::Timestamp *timestamp, int64_t timestamp_ns) {
+        static google::protobuf::Timestamp *
+        set_timestamp_protobuf(google::protobuf::Timestamp *timestamp, int64_t timestamp_ns) {
             timestamp->set_seconds(timestamp_ns / 1000000000LL);  // Convert nanoseconds to seconds
-            timestamp->set_nanos((int32_t)(timestamp_ns % 1000000000LL));  // Get remaining nanoseconds
+            timestamp->set_nanos((int32_t) (timestamp_ns % 1000000000LL));  // Get remaining nanoseconds
             return timestamp;
         }
 
-        std::vector<Message> getMessages(const std::string &id, std::optional<int64_t> startTimestampNs = std::nullopt, std::optional<int64_t> lastTimestampNs = std::nullopt) {
+        std::vector<Message> getMessages(const std::string &id, std::optional<int64_t> startTimestampNs = std::nullopt,
+                                         std::optional<int64_t> lastTimestampNs = std::nullopt) {
             steam::PollRequest request;
             request.set_sessionkey(sessionKey.value());
             request.set_targetid(id);
@@ -175,11 +176,12 @@ namespace SteamClient {
         }
     };
 
-    ClientWrapper::ClientWrapper(const std::string& url) {
+    ClientWrapper::ClientWrapper(const std::string &url) {
         pImpl = std::make_unique<impl>(url);
     }
 
-    AuthResponseState ClientWrapper::authenticate(const std::string& username, const std::string& password, const std::optional<std::string>& steamGuardCode) {
+    AuthResponseState ClientWrapper::authenticate(const std::string &username, const std::string &password,
+                                                  const std::optional<std::string> &steamGuardCode) {
         return pImpl->authenticate(username, password, steamGuardCode);
     }
 
@@ -187,11 +189,12 @@ namespace SteamClient {
         return pImpl->getFriendsList();
     }
 
-    std::vector<Message> ClientWrapper::getMessages(const std::string& id, std::optional<int64_t> startTimestampNs, std::optional<int64_t> lastTimestampNs) {
+    std::vector<Message> ClientWrapper::getMessages(const std::string &id, std::optional<int64_t> startTimestampNs,
+                                                    std::optional<int64_t> lastTimestampNs) {
         return pImpl->getMessages(id, startTimestampNs, lastTimestampNs);
     }
 
-    SendMessageCode ClientWrapper::sendMessage(const std::string& id, const std::string& message) {
+    SendMessageCode ClientWrapper::sendMessage(const std::string &id, const std::string &message) {
         return pImpl->sendMessage(id, message);
     }
 

@@ -1,7 +1,3 @@
-//
-// Created by vincent on 25/8/23.
-//
-
 #ifndef PIDGIN_STEAM_CORO_UTILS_H
 #define PIDGIN_STEAM_CORO_UTILS_H
 

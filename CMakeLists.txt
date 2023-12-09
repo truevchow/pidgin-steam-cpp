@@ -99,7 +99,7 @@ message("Protobuf_INCLUDE_DIRS: ${Protobuf_INCLUDE_DIRS}")
 #         src/steam_rsa.cpp src/libdummy.cpp src/libdummy.h)
 add_library(pidgin_steam SHARED
         #        src/steam_rsa.cpp
-        src/libdummy.cpp src/libdummy.h src/ipc_pipe.h
+        src/libdummy.cpp src/libdummy.h
         src/coro_utils.h
         ${Protobuf_LIBRARIES}
         src/grpc_client_wrapper.h
