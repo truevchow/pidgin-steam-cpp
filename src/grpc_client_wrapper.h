@@ -65,17 +65,17 @@ namespace SteamClient {
         std::unique_ptr<impl> pImpl;
 
     public:
-        explicit ClientWrapper(std::string url);
+        explicit ClientWrapper(const std::string& url);
 
         ~ClientWrapper();
 
-        AuthResponseState authenticate(std::string username, std::string password, std::optional<std::string> steamGuardCode);
+        AuthResponseState authenticate(const std::string& username, const std::string& password, const std::optional<std::string>& steamGuardCode);
 
         FriendsList getFriendsList();
 
-        std::vector<Message> getMessages(std::string id, std::optional<int64_t> startTimestampNs = std::nullopt, std::optional<int64_t> lastTimestampNs = std::nullopt);
+        std::vector<Message> getMessages(const std::string& id, std::optional<int64_t> startTimestampNs = std::nullopt, std::optional<int64_t> lastTimestampNs = std::nullopt);
 
-        SendMessageCode sendMessage(std::string id, std::string message);
+        SendMessageCode sendMessage(const std::string& id, const std::string& message);
 
         void resetSessionKey();
 
