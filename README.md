@@ -1,4 +1,4 @@
-# pidgin-steam: Steam plugin for Pidgin
+# pidgin-steam-cpp: Steam plugin for Pidgin
 
 WIP. Intended to replace the now defunct https://github.com/EionRobb/pidgin-opensteamworks.
 
@@ -9,6 +9,7 @@ This branch consists of:
 ## Build
 
 Dependencies:
+* C++20
 * CMake
 * protobuf
   * protoc
@@ -41,7 +42,10 @@ Run pidgin:
 
 ## TODO
 
-- [ ] make gRPC client asynchronous, e.g. with cppcoro
+- [X] make gRPC client asynchronous, e.g. with cppcoro
+- [ ] fix coroutine crashes
+  - [ ] on `steam_close`
+  - [ ] use multithreading for gRPC client
 - [ ] More robust handling of gRPC errors
 - [ ] cleanups
   - [ ] better build system?
