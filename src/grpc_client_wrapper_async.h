@@ -12,6 +12,8 @@ namespace SteamClient {
         struct impl;
         std::unique_ptr<impl> pImpl;
 
+        void _check_session_key();
+
     public:
         explicit AsyncClientWrapper(const std::string &address);
 
@@ -31,6 +33,8 @@ namespace SteamClient {
         void resetSessionKey();
 
         bool shouldReset();
+
+        bool isSessionKeySet();
     };
 } // SteamClient
 

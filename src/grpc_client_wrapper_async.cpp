@@ -247,18 +247,27 @@ namespace SteamClient {
     }
 
     cppcoro::task<FriendsList> AsyncClientWrapper::getFriendsList() {
+        _check_session_key();
         return pImpl->getFriendsList();
     }
 
     cppcoro::task<std::vector<Message>>
     AsyncClientWrapper::getMessages(const std::string &id, std::optional<int64_t> startTimestampNs,
                                     std::optional<int64_t> lastTimestampNs) {
+        _check_session_key();
         return pImpl->getMessages(id, startTimestampNs, lastTimestampNs);
     }
 
     cppcoro::task<SendMessageCode>
     AsyncClientWrapper::sendMessage(const std::string &id, const std::string &message) {
+        _check_session_key();
         return pImpl->sendMessage(id, message);
+    }
+
+    void AsyncClientWrapper::_check_session_key() {
+        if (!isSessionKeySet()) {
+            throw std::runtime_error("session key not set");
+        }
     }
 
     void AsyncClientWrapper::resetSessionKey() {
@@ -267,6 +276,10 @@ namespace SteamClient {
 
     bool AsyncClientWrapper::shouldReset() {
         return !pImpl->lastSuccessState;
+    }
+
+    bool AsyncClientWrapper::isSessionKeySet() {
+        return pImpl->sessionKey.has_value();
     }
 
     AsyncClientWrapper::AsyncClientWrapper::AsyncClientWrapper(const std::string &address) {

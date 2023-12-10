@@ -52,6 +52,10 @@
 #include "sslconn.h"
 #include "version.h"
 #include "grpc_client_wrapper.h"
+#include "grpc_client_wrapper_async.h"
+#include "cppcoro/async_scope.hpp"
+#include "cppcoro/io_service.hpp"
+#include "cppcoro/cancellation_source.hpp"
 #include <sys/stat.h>
 
 
@@ -136,8 +140,11 @@ struct SteamAccount {
     std::map<std::string, int64_t> lastMessageTimestamps;  // TODO: refactor to per-buddy state
 
     // for stub implementation
-    SteamClient::ClientWrapper client = SteamClient::ClientWrapper("localhost:8080");
-    guint poll_callback_id;
+    SteamClient::AsyncClientWrapper client{"localhost:8080"};
+    cppcoro::cancellation_source cancelTokenSource;
+    cppcoro::cancellation_token cancelToken;
+    cppcoro::async_scope scope;
+    cppcoro::io_service ioService;
 
     // custom memory allocator
     static void *operator new(size_t size) {
