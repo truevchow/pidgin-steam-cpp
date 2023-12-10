@@ -2,6 +2,7 @@
 #include "libdummy.h"
 #include "cppcoro/task.hpp"
 #include "cppcoro/sync_wait.hpp"
+#include "cppcoro/when_all.hpp"
 #include <stdexcept>
 #include <json/value.h>
 #include <json/reader.h>
@@ -106,76 +107,90 @@ static const gchar *steam_personastate_to_statustype(gint64 state) {
     return status_id;
 }
 
+cppcoro::task<std::optional<int64_t>> poll_friend_messages(SteamAccount &sa, const SteamClient::Buddy &me, const SteamClient::Buddy &x) {
+    constexpr int max_iterations = 3;
+    if (!purple_find_buddy(sa.account, x.id.c_str())) {
+        purple_debug_info("dummy", "receive_messages %s add buddy %s\n", sa.account->username, x.id.c_str());
+        auto buddy = purple_buddy_new(sa.account, x.id.c_str(), nullptr);
+        buddy->proto_data = new SteamBuddy{&sa, buddy, x.id, x.nickname, "", "", 0, "", 0};
+        purple_blist_add_buddy(buddy, nullptr, purple_find_group("Steam"), nullptr);
+    }
+    purple_debug_info("dummy", "receive_messages %s update buddy %s %s\n", sa.account->username, x.id.c_str(),
+                      x.nickname.c_str());
+    purple_serv_got_private_alias(sa.pc, x.id.c_str(), x.nickname.c_str());
+    purple_prpl_got_user_status(sa.account, x.id.c_str(), steam_personastate_to_statustype(x.personaState), nullptr);
+    auto buddy = static_cast<PurpleBuddy *>(purple_find_buddy(sa.account, x.id.c_str()));
+    if (buddy->proto_data == nullptr) {
+        buddy->proto_data = new SteamBuddy{&sa, buddy, x.id, x.nickname, "", "", 0, "", 0};
+    }
+    auto sbuddy = static_cast<SteamBuddy *>(buddy->proto_data);  // TODO
+    sbuddy->gameextrainfo = x.gameExtraInfo;
+    sbuddy->gameid = x.gameid;
+
+    auto otherId = x.id;
+    PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, otherId.c_str(),
+                                                                     sa.account);
+
+    std::optional<int64_t> lastTimestampNs, startTimestampNs;
+    std::optional<int64_t> newStartTimestampNs;
+    if (auto it = sa.lastMessageTimestamps.find(x.id); it != sa.lastMessageTimestamps.end()) {
+        newStartTimestampNs = startTimestampNs = it->second;
+    }
+    for (int i = 0; i < max_iterations; ++i) {
+        auto messages = co_await sa.client.getMessages(x.id, startTimestampNs, lastTimestampNs);
+        if (messages.empty()) {
+            break;
+        }
+        for (auto &msg: messages) {
+            purple_debug_info("dummy", "receive_messages received %s\n", msg.message.c_str());
+            //        if (real_timestamp > sa->last_message_timestamp)
+            gchar *text, *html;
+            //            const gchar *otherId;
+            //            if (g_str_equal(type, "emote") || g_str_equal(type, "my_emote"))
+            //            {
+            //                text = g_strconcat("/me ", json_object_get_string_member(message, "text"), nullptr);
+            //            } else {
+            //                text = g_strdup(json_object_get_string_member(message, "text"));
+            //            }
+            html = purple_markup_escape_text(msg.message.c_str(), -1);  // TODO: input is BBCode
+            //            otherId = json_object_get_string_member(message, "steamid_from");
+            //        if (g_str_has_prefix(type, "my_")) {
+            purple_debug_info("dummy", "receive_messages resolve conv %p\n", conv);
+            if (conv == nullptr) {
+                conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, sa.account, otherId.c_str());
+                purple_debug_info("dummy", "receive_messages make new conv %p\n", conv);
+            }
+            purple_conversation_write(conv, otherId.c_str(), html,
+                                      msg.senderId == me.id ? PURPLE_MESSAGE_SEND
+                                                             : PURPLE_MESSAGE_RECV,
+                                      msg.timestamp_ns / 1000000000LL);
+            //        } else {
+            //            serv_got_im(sa.pc, otherId, html, PURPLE_MESSAGE_RECV, real_timestamp);
+            //        }
+
+            purple_debug_info("dummy", "receive_messages done\n");
+            g_free(html);
+            //        g_free(text);
+
+            auto ts = msg.timestamp_ns;
+            lastTimestampNs = std::min(ts, lastTimestampNs.value_or(ts));
+            newStartTimestampNs = std::max(ts, newStartTimestampNs.value_or(ts)) + 1;
+        }
+    }
+    co_return newStartTimestampNs;
+}
+
 cppcoro::task<void> receive_messages(SteamAccount &sa) {
-    std::optional<int64_t> lastTimestampNs;
-    auto friendsList = co_await sa.client.getFriendsList();  // TODO: store in SteamAccount
-    int max_iterations = 3;
-    for (auto &x: friendsList.buddies) {
-        if (!purple_find_buddy(sa.account, x.id.c_str())) {
-            purple_debug_info("dummy", "receive_messages %s add buddy %s\n", sa.account->username, x.id.c_str());
-            auto buddy = purple_buddy_new(sa.account, x.id.c_str(), nullptr);
-            buddy->proto_data = new SteamBuddy{&sa, buddy, x.id, x.nickname, "", "", 0, "", 0};
-            purple_blist_add_buddy(buddy, nullptr, purple_find_group("Steam"), nullptr);
-        }
-        purple_debug_info("dummy", "receive_messages %s update buddy %s %s\n", sa.account->username, x.id.c_str(),
-                          x.nickname.c_str());
-        purple_serv_got_private_alias(sa.pc, x.id.c_str(), x.nickname.c_str());
-        purple_prpl_got_user_status(sa.account, x.id.c_str(), steam_personastate_to_statustype(x.personaState), nullptr);
-        auto buddy = static_cast<PurpleBuddy *>(purple_find_buddy(sa.account, x.id.c_str()));
-        if (buddy->proto_data == nullptr) {
-            buddy->proto_data = new SteamBuddy{&sa, buddy, x.id, x.nickname, "", "", 0, "", 0};
-        }
-        auto sbuddy = static_cast<SteamBuddy *>(buddy->proto_data);  // TODO
-        sbuddy->gameextrainfo = x.gameExtraInfo;
-        sbuddy->gameid = x.gameid;
+    auto [me, buddies] = co_await sa.client.getFriendsList();  // TODO: store in SteamAccount
 
-        auto otherId = x.id;
-        PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, otherId.c_str(),
-                                                                         sa.account);
-
-        for (int i = 0; i < max_iterations; ++i) {
-            std::optional<int64_t> startTimestampNs;
-            if (auto it = sa.lastMessageTimestamps.find(x.id); it != sa.lastMessageTimestamps.end()) {
-                startTimestampNs = it->second;
-            }
-            auto messages = co_await sa.client.getMessages(x.id, startTimestampNs, lastTimestampNs);
-            if (messages.empty()) {
-                break;
-            }
-            for (auto &msg: messages) {
-                purple_debug_info("dummy", "receive_messages received %s\n", msg.message.c_str());
-                //        if (real_timestamp > sa->last_message_timestamp)
-                gchar *text, *html;
-                //            const gchar *otherId;
-                //            if (g_str_equal(type, "emote") || g_str_equal(type, "my_emote"))
-                //            {
-                //                text = g_strconcat("/me ", json_object_get_string_member(message, "text"), nullptr);
-                //            } else {
-                //                text = g_strdup(json_object_get_string_member(message, "text"));
-                //            }
-                html = purple_markup_escape_text(msg.message.c_str(), -1);  // TODO: input is BBCode
-                //            otherId = json_object_get_string_member(message, "steamid_from");
-                //        if (g_str_has_prefix(type, "my_")) {
-                purple_debug_info("dummy", "receive_messages resolve conv %p\n", conv);
-                if (conv == nullptr) {
-                    conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, sa.account, otherId.c_str());
-                    purple_debug_info("dummy", "receive_messages make new conv %p\n", conv);
-                }
-                purple_conversation_write(conv, otherId.c_str(), html,
-                                          msg.senderId == friendsList.me->id ? PURPLE_MESSAGE_SEND
-                                                                             : PURPLE_MESSAGE_RECV,
-                                          msg.timestamp_ns / 1000000000LL);
-                //        } else {
-                //            serv_got_im(sa.pc, otherId, html, PURPLE_MESSAGE_RECV, real_timestamp);
-                //        }
-
-                purple_debug_info("dummy", "receive_messages done\n");
-                g_free(html);
-                //        g_free(text);
-
-                lastTimestampNs = std::min(msg.timestamp_ns, lastTimestampNs.value_or(msg.timestamp_ns));
-                sa.lastMessageTimestamps[x.id] = msg.timestamp_ns + 1;
-            }
+    std::vector<cppcoro::task<std::optional<int64_t>>> tasks;
+    for (auto &x: buddies) {
+        tasks.push_back(poll_friend_messages(sa, me.value(), x));
+    }
+    auto res = co_await cppcoro::when_all(std::move(tasks));
+    for (int i = 0; i < res.size(); ++i) {
+        if (res[i].has_value()) {
+            sa.lastMessageTimestamps[buddies[i].id] = res[i].value();
         }
     }
     write_last_timestamps(sa);
@@ -446,7 +461,7 @@ static void steam_login(PurpleAccount *account) {
     sa.scope.spawn(attempt_login(pc, sa));
     sa.scope.spawn([](SteamAccount &sa) -> cppcoro::task<void> {
         while (!sa.cancelToken.is_cancellation_requested()) {
-            co_await sa.ioService.schedule_after(std::chrono::milliseconds(200));
+            co_await sa.ioService.schedule_after(std::chrono::milliseconds(500));
             if (sa.client.isSessionKeySet()) {
                 co_await receive_messages(sa);
             }
