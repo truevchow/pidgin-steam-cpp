@@ -52,11 +52,12 @@ namespace SteamClient {
                     co_await ioService.schedule_after(std::chrono::milliseconds(50));
                     continue;
                 }
-                std::cout << "got completion queue event #" << tag << " => " << (ok ? "ok" : "not ok") << std::endl;
+                // std::cout << "got completion queue event #" << tag << " => " << (ok ? "ok" : "not ok") << std::endl;
                 auto &token = callbacks.at(reinterpret_cast<size_t>(tag));
                 co_await token.sequenced_set_result(ok);
             }
             std::cout << "stopping completion queue" << std::endl;
+            co_return;
         }
 
         template<typename Rpc, typename Response>

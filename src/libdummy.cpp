@@ -6,6 +6,7 @@
 #include <json/value.h>
 #include <json/reader.h>
 #include <json/writer.h>
+#include <thread>
 
 
 static constexpr bool core_is_haze = false;
@@ -68,11 +69,12 @@ static void steam_close(PurpleConnection *pc) {
 
     sa->cancelTokenSource.request_cancellation();
     sa->client.shutdown();
-    cppcoro::sync_wait(sa->scope.join());  // TODO: check if this deadlocks
-
-    purple_timeout_remove(sa->poll_callback_id);
-    sa->ioService.stop();
-    delete sa;
+    std::thread([=]() {
+        cppcoro::sync_wait(sa->scope.join());  // TODO: check if this deadlocks
+        purple_timeout_remove(sa->poll_callback_id);
+        sa->ioService.stop();
+        delete sa;
+    }).detach();
 }
 
 static const gchar *steam_personastate_to_statustype(gint64 state) {
