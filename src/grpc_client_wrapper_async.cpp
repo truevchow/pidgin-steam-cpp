@@ -238,6 +238,8 @@ namespace SteamClient {
         }
     };
 
+    AsyncClientWrapper::~AsyncClientWrapper() = default;
+
     cppcoro::task<AuthResponseState>
     AsyncClientWrapper::authenticate(const std::string &username, const std::string &password,
                                      const std::optional<std::string> &steamGuardCode) {
@@ -259,9 +261,15 @@ namespace SteamClient {
         return pImpl->sendMessage(id, message);
     }
 
+    void AsyncClientWrapper::resetSessionKey() {
+        pImpl->sessionKey = std::nullopt;
+    }
+
+    bool AsyncClientWrapper::shouldReset() {
+        return !pImpl->lastSuccessState;
+    }
+
     AsyncClientWrapper::AsyncClientWrapper::AsyncClientWrapper(const std::string &address) {
         pImpl = std::make_unique<impl>(address);
     }
-
-    AsyncClientWrapper::~AsyncClientWrapper() = default;
 } // SteamClient

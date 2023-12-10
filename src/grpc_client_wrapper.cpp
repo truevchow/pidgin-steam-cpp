@@ -7,8 +7,6 @@
 #include "../protobufs/comm_protobufs/auth.grpc.pb.h"
 
 namespace SteamClient {
-    ClientWrapper::~ClientWrapper() = default;
-
     struct ClientWrapper::impl {
         std::shared_ptr<grpc::Channel> channel;
         std::unique_ptr<steam::AuthService::Stub> authStub;
@@ -175,6 +173,8 @@ namespace SteamClient {
             }
         }
     };
+
+    ClientWrapper::~ClientWrapper() = default;
 
     ClientWrapper::ClientWrapper(const std::string &url) {
         pImpl = std::make_unique<impl>(url);

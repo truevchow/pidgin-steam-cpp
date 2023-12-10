@@ -28,6 +28,9 @@ namespace SteamClient {
 
         cppcoro::task <SendMessageCode> sendMessage(const std::string &id, const std::string &message);
 
+        void resetSessionKey();
+
+        bool shouldReset();
     };
 } // SteamClient
 
