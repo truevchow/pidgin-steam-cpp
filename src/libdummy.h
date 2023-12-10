@@ -141,6 +141,7 @@ struct SteamAccount {
 
     // for stub implementation
     SteamClient::AsyncClientWrapper client{"localhost:8080"};
+    guint poll_callback_id;
     cppcoro::cancellation_source cancelTokenSource;
     cppcoro::cancellation_token cancelToken;
     cppcoro::async_scope scope;

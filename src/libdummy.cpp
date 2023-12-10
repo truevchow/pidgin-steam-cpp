@@ -6,7 +6,6 @@
 #include <json/value.h>
 #include <json/reader.h>
 #include <json/writer.h>
-#include <thread>
 
 
 static constexpr bool core_is_haze = false;
@@ -68,7 +67,10 @@ static void steam_close(PurpleConnection *pc) {
     auto *sa = static_cast<SteamAccount *>(pc->proto_data);
 
     sa->cancelTokenSource.request_cancellation();
+    sa->client.shutdown();
     cppcoro::sync_wait(sa->scope.join());  // TODO: check if this deadlocks
+
+    purple_timeout_remove(sa->poll_callback_id);
     sa->ioService.stop();
     delete sa;
 }
@@ -108,14 +110,12 @@ cppcoro::task<void> receive_messages(SteamAccount &sa) {
     int max_iterations = 3;
     for (auto &x: friendsList.buddies) {
         if (!purple_find_buddy(sa.account, x.id.c_str())) {
-            purple_debug_info("dummy", "steam_send_im %s add buddy %s\n", sa.account->username, x.id.c_str());
+            purple_debug_info("dummy", "receive_messages %s add buddy %s\n", sa.account->username, x.id.c_str());
             auto buddy = purple_buddy_new(sa.account, x.id.c_str(), nullptr);
             buddy->proto_data = new SteamBuddy{&sa, buddy, x.id, x.nickname, "", "", 0, "", 0};
             purple_blist_add_buddy(buddy, nullptr, purple_find_group("Steam"), nullptr);
-            //            g_string_append_c(users_to_update, ',');
-            //            g_string_append(users_to_update, steamid);
         }
-        purple_debug_info("dummy", "steam_send_im %s update buddy %s %s\n", sa.account->username, x.id.c_str(),
+        purple_debug_info("dummy", "receive_messages %s update buddy %s %s\n", sa.account->username, x.id.c_str(),
                           x.nickname.c_str());
         purple_serv_got_private_alias(sa.pc, x.id.c_str(), x.nickname.c_str());
         purple_prpl_got_user_status(sa.account, x.id.c_str(), steam_personastate_to_statustype(x.personaState), nullptr);
@@ -141,7 +141,7 @@ cppcoro::task<void> receive_messages(SteamAccount &sa) {
                 break;
             }
             for (auto &msg: messages) {
-                purple_debug_info("dummy", "steam_send_im received %s\n", msg.message.c_str());
+                purple_debug_info("dummy", "receive_messages received %s\n", msg.message.c_str());
                 //        if (real_timestamp > sa->last_message_timestamp)
                 gchar *text, *html;
                 //            const gchar *otherId;
@@ -154,10 +154,10 @@ cppcoro::task<void> receive_messages(SteamAccount &sa) {
                 html = purple_markup_escape_text(msg.message.c_str(), -1);  // TODO: input is BBCode
                 //            otherId = json_object_get_string_member(message, "steamid_from");
                 //        if (g_str_has_prefix(type, "my_")) {
-                purple_debug_info("dummy", "steam_send_im resolve conv %p\n", conv);
+                purple_debug_info("dummy", "receive_messages resolve conv %p\n", conv);
                 if (conv == nullptr) {
                     conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, sa.account, otherId.c_str());
-                    purple_debug_info("dummy", "steam_send_im make new conv %p\n", conv);
+                    purple_debug_info("dummy", "receive_messages make new conv %p\n", conv);
                 }
                 purple_conversation_write(conv, otherId.c_str(), html,
                                           msg.senderId == friendsList.me->id ? PURPLE_MESSAGE_SEND
@@ -167,7 +167,7 @@ cppcoro::task<void> receive_messages(SteamAccount &sa) {
                 //            serv_got_im(sa.pc, otherId, html, PURPLE_MESSAGE_RECV, real_timestamp);
                 //        }
 
-                purple_debug_info("dummy", "steam_send_im done\n");
+                purple_debug_info("dummy", "receive_messages done\n");
                 g_free(html);
                 //        g_free(text);
 
@@ -180,8 +180,16 @@ cppcoro::task<void> receive_messages(SteamAccount &sa) {
     co_return;
 }
 
+gboolean poll_for_messages(PurpleConnection *pc) {
+    purple_debug_info("dummy", "poll_for_messages start %p\n", pc);
+    SteamAccount &sa = *static_cast<SteamAccount *>(pc->proto_data);
+    sa.ioService.process_pending_events();
+    purple_debug_info("dummy", "poll_for_messages end %p\n", pc);
+    return G_SOURCE_CONTINUE;
+}
+
 cppcoro::task<int> send_message(PurpleConnection *pc, SteamAccount &sa, const std::string &who, const std::string &msg) {
-    purple_debug_info("dummy", "steam_send_im with %s %s\n", who.c_str(), msg.c_str());
+    purple_debug_info("dummy", "send_message with %s %s\n", who.c_str(), msg.c_str());
     switch (co_await sa.client.sendMessage(who, msg)) {
         case SteamClient::SEND_SUCCESS:
             co_return 0;
@@ -414,6 +422,7 @@ static void steam_login(PurpleAccount *account) {
     sa.pc = pc;
     sa.username = sa.account->username;
     sa.password = sa.account->password;
+    sa.poll_callback_id = purple_timeout_add(100, (GSourceFunc) poll_for_messages, pc);
 
     // sa->hostname_ip_cache = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
     // sa->sent_messages_hash = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, nullptr);
@@ -431,18 +440,16 @@ static void steam_login(PurpleAccount *account) {
 
     sa.cancelToken = sa.cancelTokenSource.token();
 
-    sa.scope.spawn(attempt_login(pc, sa));  // TODO: is there a need to co_await this?
+    sa.scope.spawn(sa.client.run_cq(reinterpret_cast<SteamAccount*>(pc->proto_data)->ioService));
+    sa.scope.spawn(attempt_login(pc, sa));
     sa.scope.spawn([](SteamAccount &sa) -> cppcoro::task<void> {
         while (!sa.cancelToken.is_cancellation_requested()) {
-            co_await sa.ioService.schedule_after(std::chrono::seconds(1));
+            co_await sa.ioService.schedule_after(std::chrono::milliseconds(200));
             if (sa.client.isSessionKeySet()) {
                 co_await receive_messages(sa);
             }
         }
     }(*reinterpret_cast<SteamAccount*>(pc->proto_data)));
-    std::thread([](SteamAccount &sa) {
-        sa.ioService.process_events();
-    }, std::reference_wrapper(*reinterpret_cast<SteamAccount*>(pc->proto_data))).detach();
 }
 
 //static void steam_login_access_token_cb(SteamAccount *sa, JsonObject *obj, gpointer user_data) { }

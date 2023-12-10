@@ -9,6 +9,7 @@
 #include "../protobufs/comm_protobufs/auth.pb.h"
 #include "../protobufs/comm_protobufs/auth.grpc.pb.h"
 #include "cppcoro/sync_wait.hpp"
+#include "cppcoro/io_service.hpp"
 
 namespace SteamClient {
     struct AsyncClientWrapper::impl {
@@ -18,8 +19,7 @@ namespace SteamClient {
 
         grpc::CompletionQueue completionQueue;
         std::atomic<size_t> tagCounter{0};
-        std::atomic<bool> shutdown{false};
-        std::jthread completionQueueThread;
+        std::atomic<bool> _shutdown{false};
         std::map<size_t, TaskCompletionSource<bool>> callbacks;
 
         SteamClient::AuthResponseState lastAuthResponseState = AUTH_UNKNOWN_FAILURE;
@@ -30,23 +30,28 @@ namespace SteamClient {
             channel = grpc::CreateChannel(address, grpc::InsecureChannelCredentials());
             authStub = steam::AuthService::NewStub(channel);
             messageStub = steam::MessageService::NewStub(channel);
-
-            completionQueueThread = std::jthread([this]() {
-                cppcoro::sync_wait(std::move(run_cq()));
-            });
         }
 
-        ~impl() {
-            shutdown = true;
-            completionQueue.Shutdown();
-            completionQueueThread.join();
+        void shutdown() {
+            _shutdown = true;
+            completionQueue.Shutdown();  // TODO: how to ensure no additional gRPC events are enqueued?
         }
 
-        cppcoro::task<void> run_cq() {
+        ~impl() = default;
+
+        cppcoro::task<void> run_cq(cppcoro::io_service &ioService) {
             std::cout << "starting completion queue" << std::endl;
             void *tag;
             bool ok;
-            while (completionQueue.Next(&tag, &ok)) {
+            while (true) {
+                auto status = completionQueue.AsyncNext(&tag, &ok, gpr_time_0(GPR_CLOCK_REALTIME));
+                if (status == grpc::CompletionQueue::SHUTDOWN) {
+                    break;
+                }
+                if (status == grpc::CompletionQueue::TIMEOUT) {
+                    co_await ioService.schedule_after(std::chrono::milliseconds(50));
+                    continue;
+                }
                 std::cout << "got completion queue event #" << tag << " => " << (ok ? "ok" : "not ok") << std::endl;
                 auto &token = callbacks.at(reinterpret_cast<size_t>(tag));
                 co_await token.sequenced_set_result(ok);
@@ -239,6 +244,14 @@ namespace SteamClient {
     };
 
     AsyncClientWrapper::~AsyncClientWrapper() = default;
+
+    cppcoro::task<void> AsyncClientWrapper::run_cq(cppcoro::io_service &ioService) {
+        return pImpl->run_cq(ioService);
+    };
+
+    void AsyncClientWrapper::shutdown() {
+        return pImpl->shutdown();
+    };
 
     cppcoro::task<AuthResponseState>
     AsyncClientWrapper::authenticate(const std::string &username, const std::string &password,

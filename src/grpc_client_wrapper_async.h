@@ -6,6 +6,7 @@
 #include <vector>
 #include <memory>
 #include "cppcoro/task.hpp"
+#include "cppcoro/io_service.hpp"
 
 namespace SteamClient {
     class AsyncClientWrapper {
@@ -18,6 +19,10 @@ namespace SteamClient {
         explicit AsyncClientWrapper(const std::string &address);
 
         ~AsyncClientWrapper();
+
+        cppcoro::task<void> run_cq(cppcoro::io_service &ioService);
+
+        void shutdown();
 
         cppcoro::task <AuthResponseState> authenticate(const std::string &username, const std::string &password,
                                                        const std::optional<std::string> &steamGuardCode);
