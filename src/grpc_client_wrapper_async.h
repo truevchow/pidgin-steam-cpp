@@ -8,14 +8,14 @@
 #include "cppcoro/task.hpp"
 
 namespace SteamClient {
-    class grpc_client_wrapper_async {
+    class AsyncClientWrapper {
         struct impl;
         std::unique_ptr<impl> pImpl;
 
     public:
-        explicit grpc_client_wrapper_async(const std::string &address);
+        explicit AsyncClientWrapper(const std::string &address);
 
-        ~grpc_client_wrapper_async();
+        ~AsyncClientWrapper();
 
         cppcoro::task <AuthResponseState> authenticate(const std::string &username, const std::string &password,
                                                        const std::optional<std::string> &steamGuardCode);

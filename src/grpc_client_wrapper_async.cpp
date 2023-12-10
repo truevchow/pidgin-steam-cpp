@@ -11,7 +11,7 @@
 #include "cppcoro/sync_wait.hpp"
 
 namespace SteamClient {
-    struct grpc_client_wrapper_async::impl {
+    struct AsyncClientWrapper::impl {
         std::shared_ptr<grpc::Channel> channel;
         std::unique_ptr<steam::AuthService::Stub> authStub;
         std::unique_ptr<steam::MessageService::Stub> messageStub;
@@ -239,29 +239,29 @@ namespace SteamClient {
     };
 
     cppcoro::task<AuthResponseState>
-    grpc_client_wrapper_async::authenticate(const std::string &username, const std::string &password,
-                                            const std::optional<std::string> &steamGuardCode) {
+    AsyncClientWrapper::authenticate(const std::string &username, const std::string &password,
+                                     const std::optional<std::string> &steamGuardCode) {
         return pImpl->authenticate(username, password, steamGuardCode);
     }
 
-    cppcoro::task<FriendsList> grpc_client_wrapper_async::getFriendsList() {
+    cppcoro::task<FriendsList> AsyncClientWrapper::getFriendsList() {
         return pImpl->getFriendsList();
     }
 
     cppcoro::task<std::vector<Message>>
-    grpc_client_wrapper_async::getMessages(const std::string &id, std::optional<int64_t> startTimestampNs,
-                                           std::optional<int64_t> lastTimestampNs) {
+    AsyncClientWrapper::getMessages(const std::string &id, std::optional<int64_t> startTimestampNs,
+                                    std::optional<int64_t> lastTimestampNs) {
         return pImpl->getMessages(id, startTimestampNs, lastTimestampNs);
     }
 
     cppcoro::task<SendMessageCode>
-    grpc_client_wrapper_async::sendMessage(const std::string &id, const std::string &message) {
+    AsyncClientWrapper::sendMessage(const std::string &id, const std::string &message) {
         return pImpl->sendMessage(id, message);
     }
 
-    grpc_client_wrapper_async::grpc_client_wrapper_async::grpc_client_wrapper_async(const std::string &address) {
+    AsyncClientWrapper::AsyncClientWrapper::AsyncClientWrapper(const std::string &address) {
         pImpl = std::make_unique<impl>(address);
     }
 
-    grpc_client_wrapper_async::~grpc_client_wrapper_async() = default;
+    AsyncClientWrapper::~AsyncClientWrapper() = default;
 } // SteamClient

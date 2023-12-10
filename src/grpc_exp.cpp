@@ -22,7 +22,7 @@ void sync() {
 }
 
 cppcoro::task<void>
-async_task(SteamClient::grpc_client_wrapper_async &client, std::string username, std::string password) {
+async_task(SteamClient::AsyncClientWrapper &client, std::string username, std::string password) {
     std::cout << "async_task start" << std::endl;
     std::cout << "auth result: " << co_await client.authenticate(username, password, std::nullopt) << "\n";
     std::cout << "async_task end" << std::endl;
@@ -46,7 +46,7 @@ void async() {
         return;
     }
 
-    SteamClient::grpc_client_wrapper_async client("localhost:8080");
+    SteamClient::AsyncClientWrapper client("localhost:8080");
     auto username = EnvVars::get("STEAM_USERNAME")().value_or(root["username"].asString());
     auto password = EnvVars::get("STEAM_PASSWORD")().value_or(root["password"].asString());
     std::cout << "username: " << username << std::endl;
