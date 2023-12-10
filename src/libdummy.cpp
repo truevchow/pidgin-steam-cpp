@@ -126,6 +126,7 @@ cppcoro::task<std::optional<int64_t>> poll_friend_messages(SteamAccount &sa, con
     auto sbuddy = static_cast<SteamBuddy *>(buddy->proto_data);  // TODO
     sbuddy->gameextrainfo = x.gameExtraInfo;
     sbuddy->gameid = x.gameid;
+    sbuddy->avatarUrl = x.avatarUrl.icon;
 
     auto otherId = x.id;
     PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, otherId.c_str(),

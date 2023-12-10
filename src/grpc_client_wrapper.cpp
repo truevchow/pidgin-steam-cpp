@@ -86,6 +86,15 @@ namespace SteamClient {
         }
 
         FriendsList getFriendsList() {
+            auto convert = [](const steam::Persona &user) -> Buddy {
+                const auto& avatarUrl = user.avatarurl();
+                return {
+                    user.name(), user.id(), (PersonaState) (int) user.personastate(),
+                    {}, "",  // TODO: get rich presence
+                    {avatarUrl.icon(), avatarUrl.medium(), avatarUrl.full()}
+                };
+            };
+
             steam::FriendsListRequest request;
             request.set_sessionkey(sessionKey.value());
 
@@ -101,10 +110,9 @@ namespace SteamClient {
             std::cout << "Friends: " << response.friends_size() << std::endl;
             std::vector<Buddy> friends;
             for (auto &x: response.friends()) {
-                friends.emplace_back(x.name(), x.id(), (PersonaState) (int) x.personastate());
+                friends.emplace_back(convert(x));
             }
-            auto me = response.user();
-            return {std::optional<Buddy>({me.name(), me.id(), (PersonaState) (int) me.personastate()}), friends};
+            return {std::optional<Buddy>(convert(response.user())), friends};
         }
 
         static google::protobuf::Timestamp *

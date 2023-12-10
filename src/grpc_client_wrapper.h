@@ -20,6 +20,12 @@ namespace SteamClient {
         INVISIBLE = 7,
     };
 
+    struct AvatarUrl {
+        std::string icon;
+        std::string medium;
+        std::string full;
+    };
+
     struct Buddy {
         std::string nickname;
         std::string id;
@@ -28,6 +34,8 @@ namespace SteamClient {
         // rich presence
         std::optional<int> gameid;
         std::string gameExtraInfo;
+
+        AvatarUrl avatarUrl;
     };
 
     struct Message {

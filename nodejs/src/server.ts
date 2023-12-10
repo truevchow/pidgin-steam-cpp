@@ -375,11 +375,16 @@ function messageRoute(router: ConnectRouter) {
                 console.log("Friend", steamId, friend.player_name, personaState)
                 let isOnline = personaState !== SteamUser.EPersonaState.Offline;
                 // console.log("isOnline", isOnline);
+                console.log(friend.player_name, friend.avatar_url_icon);
                 return new Persona({
                     id: steamId,
                     name: friend.player_name,
                     personaState: (personaState as unknown) as PersonaState,
-                    // avatarUrl: friend.avatar_url_full,
+                    avatarUrl: {
+                        icon: friend.avatar_url_icon,
+                        medium: friend.avatar_url_medium,
+                        full: friend.avatar_url_full,
+                    },
                     // lastLogoff: Timestamp.fromDate(friend.last_logoff),
                     // lastLogon: Timestamp.fromDate(friend.last_logon),
                     // lastSeenOnline: Timestamp.fromDate(friend.last_seen_online),

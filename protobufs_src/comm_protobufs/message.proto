@@ -57,10 +57,19 @@ enum PersonaState {  // mirrors SteamUser.EPersonaState
     INVISIBLE = 7;
 }
 
+message AvatarUrl {
+    string icon = 1;
+    string medium = 2;
+    string full = 3;
+}
+
 message Persona {
     string id = 1;
     string name = 2;
     PersonaState personaState = 3;
+    optional int32 gameid = 4;
+    optional string gameExtraInfo = 5;
+    AvatarUrl avatarUrl = 6;
 }
 
 message FriendsListResponse {

@@ -166,7 +166,7 @@ struct SteamBuddy {
     std::string realname;
     std::string profileurl;
     guint lastlogoff;
-    std::string avatar;
+    std::string avatarUrl;
     guint personastateflags;
 
     std::optional<int> gameid;
