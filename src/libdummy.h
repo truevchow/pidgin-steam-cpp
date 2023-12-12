@@ -65,6 +65,7 @@
 #include <map>
 #include <optional>
 #include <stdexcept>
+#include <semaphore>
 
 #if GLIB_MAJOR_VERSION >= 2 && GLIB_MINOR_VERSION >= 12
 #	define atoll(a) g_ascii_strtoll(a, NULL, 0)

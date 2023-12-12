@@ -69,12 +69,23 @@ static void steam_close(PurpleConnection *pc) {
     auto *sa = static_cast<SteamAccount *>(pc->proto_data);
 
     sa->cancelTokenSource.request_cancellation();
-    sa->client.shutdown();
+    purple_timeout_remove(sa->poll_callback_id);
+
     std::thread([=]() {
+        std::atomic<bool> done = false;
+        std::thread pump_thread([&done, sa]() {
+            while (!done) {
+                sa->ioService.process_pending_events();
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        });
+        sa->client.shutdown();  // TODO: still see "ASSERTION FAILED: grpc_cq_begin_op(cq_, notify_tag)" sometimes
         cppcoro::sync_wait(sa->scope.join());  // TODO: check if this deadlocks
-        purple_timeout_remove(sa->poll_callback_id);
+        done = true;
+        pump_thread.join();
         sa->ioService.stop();
         delete sa;
+        purple_debug_info("dummy", "steam_close done\n");
     }).detach();
 }
 
@@ -201,6 +212,9 @@ cppcoro::task<void> receive_messages(SteamAccount &sa) {
 gboolean poll_for_messages(PurpleConnection *pc) {
     purple_debug_info("dummy", "poll_for_messages start %p\n", pc);
     SteamAccount &sa = *static_cast<SteamAccount *>(pc->proto_data);
+    if (sa.cancelToken.is_cancellation_requested()) {
+        return G_SOURCE_REMOVE;
+    }
     sa.ioService.process_pending_events();
     purple_debug_info("dummy", "poll_for_messages end %p\n", pc);
     return G_SOURCE_CONTINUE;
