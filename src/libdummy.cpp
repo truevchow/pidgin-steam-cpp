@@ -222,22 +222,29 @@ gboolean poll_for_messages(PurpleConnection *pc) {
 
 cppcoro::task<int> send_message(PurpleConnection *pc, SteamAccount &sa, const std::string &who, const std::string &msg) {
     purple_debug_info("dummy", "send_message with %s %s\n", who.c_str(), msg.c_str());
+    // TODO: better error handling
     switch (co_await sa.client.sendMessage(who, msg)) {
         case SteamClient::SEND_SUCCESS:
             co_return 0;
         case SteamClient::SEND_INVALID_SESSION_KEY:
+            purple_notify_warning(pc, "Session Issue", "Session Issue",
+                                  "There seems to be an issue with your current session. Please log out and log back in again.");
             purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
                                            "Invalid session key");
             co_return -ENOTCONN;
         case SteamClient::SEND_INVALID_TARGET_ID:
-            purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
-                                           "Invalid target ID");
+            purple_debug_warning("dummy", "send_message invalid target ID %s\n", who.c_str());
+            // purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
+            //                                "Invalid target ID");
             co_return -1;
         case SteamClient::SEND_INVALID_MESSAGE:
-            purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
-                                           "Invalid message");
+            purple_debug_warning("dummy", "send_message invalid message %s\n", msg.c_str());
+            // purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
+            //                                "Invalid message");
             co_return -2;
         case SteamClient::SEND_UNKNOWN_FAILURE:
+            purple_notify_warning(pc, "Session Issue", "Session Issue",
+                                  "There seems to be an issue with your current session. Please log out and log back in again.");
             purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
                                            "Unknown error");
             co_return -3;

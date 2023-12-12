@@ -87,8 +87,10 @@ namespace SteamClient {
             grpc::ClientContext context;
             steam::AuthResponse response;
             auto rpc = authStub->AsyncAuthenticate(&context, request, &completionQueue);
-            if (grpc::Status status; !co_await run_call(rpc, response, status)) {
-                co_return std::make_tuple(lastAuthResponseState, "");
+            if (grpc::Status status; !co_await run_call(rpc, response, status) || !status.ok()) {
+                std::cout << "Auth failed (gRPC failure)" << std::endl;
+                std::cout << status.error_code() << ": " << status.error_message() << std::endl;
+                co_return std::make_tuple(AUTH_UNKNOWN_FAILURE, "");
             }
 
             switch (response.reason()) {
@@ -141,7 +143,7 @@ namespace SteamClient {
             steam::FriendsListResponse response;
             grpc::ClientContext context;
             auto rpc = messageStub->AsyncGetFriendsList(&context, request, &completionQueue);
-            if (grpc::Status status; !co_await run_call(rpc, response, status)) {
+            if (grpc::Status status; !co_await run_call(rpc, response, status) || !status.ok()) {
                 std::cout << "GetFriendsList failed (gRPC failure)" << std::endl;
                 std::cout << status.error_code() << ": " << status.error_message() << std::endl;
                 co_return FriendsList{std::nullopt, {}};
@@ -219,7 +221,7 @@ namespace SteamClient {
             grpc::ClientContext context;
             steam::SendMessageResult response;
             auto rpc = messageStub->AsyncSendChatMessage(&context, request, &completionQueue);
-            if (grpc::Status status; !co_await run_call(rpc, response, status)) {
+            if (grpc::Status status; !co_await run_call(rpc, response, status) || !status.ok()) {
                 std::cout << "SendMessage failed (gRPC failure)" << std::endl;
                 std::cout << status.error_code() << ": " << status.error_message() << std::endl;
                 co_return SEND_UNKNOWN_FAILURE;
