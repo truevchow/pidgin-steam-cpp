@@ -88,7 +88,6 @@ let activeSessions: Map<string, SessionWrapper> = new Map();
 function authRoute(router: ConnectRouter) {
     router.service(AuthService, {
         async authenticate(call) {
-            // console.log("Received", call.toJson());
             let sessionKey: string;
             let wrapper: SessionWrapper;
             let isNew: boolean;
@@ -314,12 +313,10 @@ function messageRoute(router: ConnectRouter) {
             var startTime = call.startTimestamp?.toDate();
             var lastTime = call.lastTimestamp?.toDate();
             for (var i = 0; i < 10; ++i) {
-                console.log("lastTime", lastTime)
                 let { messages, more_available } = await client.chat.getFriendMessageHistory(steamId, {
                     startTime: startTime,
                     lastTime: lastTime,
                 });
-                console.log("more_available", more_available);
                 allMessages.push(...messages.filter((message) => message.server_timestamp.getTime() > (call.startTimestamp?.toDate().getTime() || 0)));
                 if (!more_available) {
                     break;
@@ -332,14 +329,13 @@ function messageRoute(router: ConnectRouter) {
             allMessages.sort((a, b) => a.server_timestamp.getTime() - b.server_timestamp.getTime());
 
             for await (let message of allMessages) {
-                console.log("Message", message);
                 yield new ResponseMessage({
                     senderId: message.sender.getSteamID64(),
                     message: message.message,
                     timestamp: Timestamp.fromDate(message.server_timestamp),
                 });
             }
-            console.log("Done polling messages")
+            console.log(`Done polling ${allMessages.length} messages`)
         },
         async getFriendsList(call: FriendsListRequest) {
             console.log("Received", call.getType().typeName, call.toJson());
@@ -366,16 +362,11 @@ function messageRoute(router: ConnectRouter) {
                 if (!friend) {
                     throw new Error("Invalid steamId");
                 }
-                // console.log("Friend", steamId, friend);
                 var personaState = friend.persona_state;
                 if (personaState === undefined || personaState === null) {
                     personaState = SteamUser.EPersonaState.Offline;
                 }
-                // console.log("state", personaState, SteamUser.EPersonaState.Offline);
-                console.log("Friend", steamId, friend.player_name, personaState)
                 let isOnline = personaState !== SteamUser.EPersonaState.Offline;
-                // console.log("isOnline", isOnline);
-                console.log(friend.player_name, friend.avatar_url_icon);
                 return new Persona({
                     id: steamId,
                     name: friend.player_name,

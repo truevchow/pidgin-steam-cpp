@@ -394,7 +394,7 @@ static unsigned int steam_send_typing(PurpleConnection *pc, const gchar *name, P
 }
 
 cppcoro::task<void> attempt_login(PurpleConnection *pc, SteamAccount &sa) {
-    purple_debug_info("debug", "steam_login with creds %s %s\n", sa.username.c_str(), sa.password.c_str());
+    purple_debug_info("debug", "steam_login with creds %s\n", sa.username.c_str());
 
     purple_connection_set_state(pc, PURPLE_CONNECTING);
     purple_connection_update_progress(pc, _("Connecting"), 1, 3);
