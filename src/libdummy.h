@@ -10,8 +10,11 @@
 #include <cstring>
 #include <glib/gi18n.h>
 #include <sys/types.h>
+
 #ifdef __GNUC__
+
 #include <unistd.h>
+
 #endif
 
 #ifndef G_GNUC_NULL_TERMINATED
@@ -29,10 +32,12 @@
 #	define dlsym(a,b) GetProcAddress(a,b)
 #	define dlclose(a) FreeLibrary(a)
 #else
+
 #	include <arpa/inet.h>
 #	include <dlfcn.h>
 #	include <netinet/in.h>
 #	include <sys/socket.h>
+
 #endif
 
 #ifndef PURPLE_PLUGINS
@@ -52,6 +57,10 @@
 #include "sslconn.h"
 #include "version.h"
 #include "grpc_client_wrapper.h"
+#include "grpc_client_wrapper_async.h"
+#include "cppcoro/async_scope.hpp"
+#include "cppcoro/io_service.hpp"
+#include "cppcoro/cancellation_source.hpp"
 #include <sys/stat.h>
 
 
@@ -61,6 +70,8 @@
 #include <map>
 #include <optional>
 #include <stdexcept>
+#include <semaphore>
+#include <set>
 
 #if GLIB_MAJOR_VERSION >= 2 && GLIB_MINOR_VERSION >= 12
 #	define atoll(a) g_ascii_strtoll(a, NULL, 0)
@@ -136,8 +147,12 @@ struct SteamAccount {
     std::map<std::string, int64_t> lastMessageTimestamps;  // TODO: refactor to per-buddy state
 
     // for stub implementation
-    SteamClient::ClientWrapper client = SteamClient::ClientWrapper("localhost:8080");
+    SteamClient::AsyncClientWrapper client{"localhost:8080"};
     guint poll_callback_id;
+    cppcoro::cancellation_source cancelTokenSource;
+    cppcoro::cancellation_token cancelToken;
+    cppcoro::async_scope scope;
+    cppcoro::io_service ioService;
 
     // custom memory allocator
     static void *operator new(size_t size) {
@@ -146,6 +161,41 @@ struct SteamAccount {
 
     static void operator delete(void *ptr) {
         g_free(ptr);
+    }
+};
+
+class SentMessageBuffer {
+    /*
+     * This is a buffer of messages that have been sent to the server, but have not yet been acknowledged.
+     * The buffer is used to prevent duplicate messages from being displayed in the chat window.
+     */
+    size_t _capacity;
+    int64_t _tolerance_ns;
+    std::multiset<std::pair<std::string, time_t>> _buffer;
+
+    void evict() {
+        if (_buffer.size() > _capacity) {
+            _buffer.erase(_buffer.begin());
+        }
+    }
+
+public:
+    SentMessageBuffer(size_t capacity = 5, int64_t tolerance_ns = 2000000000)
+            : _capacity(capacity), _tolerance_ns(tolerance_ns) {}
+
+    void add(std::string msg, time_t approx_time) {
+        evict();
+        _buffer.emplace(std::move(msg), approx_time);
+    }
+
+    bool remove(const std::string &msg, time_t approx_time) {
+        for (auto it = _buffer.begin(); it != _buffer.end(); ++it) {
+            if (it->first == msg && (int64_t) std::abs(it->second - approx_time) <= _tolerance_ns) {
+                _buffer.erase(it);
+                return true;
+            }
+        }
+        return false;
     }
 };
 
@@ -158,7 +208,7 @@ struct SteamBuddy {
     std::string realname;
     std::string profileurl;
     guint lastlogoff;
-    std::string avatar;
+    std::string avatarUrl;
     guint personastateflags;
 
     std::optional<int> gameid;
@@ -166,6 +216,8 @@ struct SteamBuddy {
     std::string gameserversteamid;
     std::string lobbysteamid;
     std::string gameserverip;
+
+    SentMessageBuffer msgBuffer;
 };
 #endif
 

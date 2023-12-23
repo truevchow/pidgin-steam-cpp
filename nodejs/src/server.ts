@@ -1,17 +1,31 @@
-import { ConnectRouter } from "@connectrpc/connect";
-import { AuthService } from './protobufs/comm_protobufs/auth_connect'
-import { AuthResponse, AuthResponse_AuthState } from './protobufs/comm_protobufs/auth_pb'
-import { MessageService } from './protobufs/comm_protobufs/message_connect'
-import { MessageRequest, SendMessageResult, SendMessageResult_SendMessageResultCode, ResponseMessage, PollRequest, FriendsListRequest, FriendsListResponse, Persona, PersonaState } from './protobufs/comm_protobufs/message_pb'
-import { fastify } from "fastify";
-import { fastifyConnectPlugin } from "@connectrpc/connect-fastify";
-import { once } from "events";
+import {ConnectRouter} from "@connectrpc/connect";
+import {AuthService} from './protobufs/comm_protobufs/auth_connect'
+import {AuthResponse, AuthResponse_AuthState} from './protobufs/comm_protobufs/auth_pb'
+import {MessageService} from './protobufs/comm_protobufs/message_connect'
+import {
+    MessageRequest,
+    SendMessageResult,
+    SendMessageResult_SendMessageResultCode,
+    ResponseMessage,
+    PollRequest,
+    FriendsListRequest,
+    FriendsListResponse,
+    Persona,
+    PersonaState,
+    StreamChatRequest,
+    ActiveMessageSessionsRequest,
+    ActiveMessageSessionResponse,
+    AckFriendMessageRequest
+} from './protobufs/comm_protobufs/message_pb'
+import {fastify} from "fastify";
+import {fastifyConnectPlugin} from "@connectrpc/connect-fastify";
+import {once} from "events";
 
 import SteamUser from 'steam-user';
 // import SteamChatRoomClient from 'steam-user/components/chatroom';
 // import {EAccountType, EPersonaState } from 'steamid';
 import SteamID from 'steamid';
-import { Timestamp } from "@bufbuild/protobuf";
+import {Timestamp} from "@bufbuild/protobuf";
 import SteamChatRoomClient from "steam-user/components/chatroom";
 
 interface SteamClientUserUpdate {  // emitted in `user` event
@@ -88,7 +102,6 @@ let activeSessions: Map<string, SessionWrapper> = new Map();
 function authRoute(router: ConnectRouter) {
     router.service(AuthService, {
         async authenticate(call) {
-            // console.log("Received", call.toJson());
             let sessionKey: string;
             let wrapper: SessionWrapper;
             let isNew: boolean;
@@ -295,7 +308,78 @@ function messageRoute(router: ConnectRouter) {
                 reasonStr: "Success",
             });
         },
-        async *pollChatMessages(call: PollRequest) {
+        async* streamFriendMessages(call: StreamChatRequest) {
+            // TODO: bidirectional streaming is error-prone, prefer polling for active sessions instead
+            // StreamFriendMessagesRequest: only contains sessionKey
+            let sessionKey: string = call.sessionKey!;
+            let wrapper = activeSessions.get(sessionKey);
+            if (!wrapper) {
+                console.log("Invalid session key", sessionKey)
+                return;
+            }
+            let client = wrapper.client;
+            console.log("Streaming messages for", client.steamID?.getSteamID64());
+
+            var messages: ResponseMessage[] = [];
+            let listener = function (message) {
+                console.log("Received friendMessage", message);
+                let responseMessage = new ResponseMessage({
+                    senderId: message.steamid_friend.getSteamID64(),
+                    message: message.message,
+                    timestamp: Timestamp.fromDate(message.server_timestamp),
+                });
+                console.log("Sending", responseMessage.toJson());
+                messages.push(responseMessage);
+            };
+            client.chat.on('friendMessage', listener);
+            while (true) {
+                if (messages.length > 0) {
+                    yield messages.shift()!;
+                } else {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            }
+            client.chat.removeListener('friendMessage', listener);
+        },
+        async getActiveFriendMessageSessions(call: ActiveMessageSessionsRequest): Promise<ActiveMessageSessionResponse> {
+            console.log("Received", call.getType().typeName, call.toJson());
+            let sessionKey = call.sessionKey!;
+            let wrapper = activeSessions.get(sessionKey);
+            if (!wrapper) {
+                console.log("Invalid session key", sessionKey);
+                throw new Error("Invalid session key");
+            }
+            let client = wrapper.client;
+
+            console.debug("Start polling active sessions");
+            let {sessions, timestamp} = await client.chat.getActiveFriendMessageSessions(
+                call.since ? {conversationsSince: call.since.toDate()} : undefined);
+            var sessionsResult = sessions.map((session) => {
+                return {
+                    targetId: session.steamid_friend.getSteamID64(),
+                    lastMessageTimestamp: Timestamp.fromDate(session.time_last_message),
+                    lastViewTimestamp: Timestamp.fromDate(session.time_last_view),
+                    unreadMessageCount: session.unread_message_count,
+                };
+            });
+            console.debug("Active sessions:", sessionsResult);
+            return new ActiveMessageSessionResponse({
+                sessions: sessionsResult,
+                timestamp: Timestamp.fromDate(timestamp),
+            });
+        },
+        async ackFriendMessage(call: AckFriendMessageRequest) {
+            console.log("Received", call.getType().typeName, call.toJson());
+            let sessionKey = call.sessionKey!;
+            let wrapper = activeSessions.get(sessionKey);
+            if (!wrapper) {
+                throw new Error("Invalid session key");
+            }
+            let client = wrapper.client;
+            let steamId = new SteamID(call.targetId!);
+            client.chat.ackFriendMessage(steamId, call.lastTimestamp!.toDate());
+        },
+        async* pollChatMessages(call: PollRequest) {
             console.log("Received", call.getType().typeName, call.toJson());
             let sessionKey = call.sessionKey!;
             let wrapper = activeSessions.get(sessionKey);
@@ -309,17 +393,18 @@ function messageRoute(router: ConnectRouter) {
             console.log("Polling messages for", steamId)
             // https://stackoverflow.com/questions/46754984/typescript-how-to-use-not-exported-type-definitions/46763911#46763911
             // https://stackoverflow.com/questions/48011353/how-to-unwrap-the-type-of-a-promise
-            type FriendMessageArray = ReturnType<SteamChatRoomClient['getFriendMessageHistory']> extends Promise<{ messages: infer U, more_available: boolean } > ? U : never;
+            type FriendMessageArray = ReturnType<SteamChatRoomClient['getFriendMessageHistory']> extends Promise<{
+                messages: infer U,
+                more_available: boolean
+            }> ? U : never;
             const allMessages: FriendMessageArray = [];
             var startTime = call.startTimestamp?.toDate();
             var lastTime = call.lastTimestamp?.toDate();
             for (var i = 0; i < 10; ++i) {
-                console.log("lastTime", lastTime)
-                let { messages, more_available } = await client.chat.getFriendMessageHistory(steamId, {
+                let {messages, more_available} = await client.chat.getFriendMessageHistory(steamId, {
                     startTime: startTime,
                     lastTime: lastTime,
                 });
-                console.log("more_available", more_available);
                 allMessages.push(...messages.filter((message) => message.server_timestamp.getTime() > (call.startTimestamp?.toDate().getTime() || 0)));
                 if (!more_available) {
                     break;
@@ -332,14 +417,13 @@ function messageRoute(router: ConnectRouter) {
             allMessages.sort((a, b) => a.server_timestamp.getTime() - b.server_timestamp.getTime());
 
             for await (let message of allMessages) {
-                console.log("Message", message);
                 yield new ResponseMessage({
                     senderId: message.sender.getSteamID64(),
                     message: message.message,
                     timestamp: Timestamp.fromDate(message.server_timestamp),
                 });
             }
-            console.log("Done polling messages")
+            console.log(`Done polling ${allMessages.length} messages`)
         },
         async getFriendsList(call: FriendsListRequest) {
             console.log("Received", call.getType().typeName, call.toJson());
@@ -357,6 +441,7 @@ function messageRoute(router: ConnectRouter) {
                     await new Promise(resolve => setTimeout(resolve, 100));
                 }
             }
+
             await checkFriendsLoaded(Date.now(), 5000);
 
             let client = wrapper.client;
@@ -366,20 +451,20 @@ function messageRoute(router: ConnectRouter) {
                 if (!friend) {
                     throw new Error("Invalid steamId");
                 }
-                // console.log("Friend", steamId, friend);
                 var personaState = friend.persona_state;
                 if (personaState === undefined || personaState === null) {
                     personaState = SteamUser.EPersonaState.Offline;
                 }
-                // console.log("state", personaState, SteamUser.EPersonaState.Offline);
-                console.log("Friend", steamId, friend.player_name, personaState)
                 let isOnline = personaState !== SteamUser.EPersonaState.Offline;
-                // console.log("isOnline", isOnline);
                 return new Persona({
                     id: steamId,
                     name: friend.player_name,
                     personaState: (personaState as unknown) as PersonaState,
-                    // avatarUrl: friend.avatar_url_full,
+                    avatarUrl: {
+                        icon: friend.avatar_url_icon,
+                        medium: friend.avatar_url_medium,
+                        full: friend.avatar_url_full,
+                    },
                     // lastLogoff: Timestamp.fromDate(friend.last_logoff),
                     // lastLogon: Timestamp.fromDate(friend.last_logon),
                     // lastSeenOnline: Timestamp.fromDate(friend.last_seen_online),
@@ -423,7 +508,7 @@ async function main() {
         reply.send("Hello World!");
     });
 
-    await server.listen({ host: "localhost", port: 8080 });
+    await server.listen({host: "localhost", port: 8080});
     console.log("server is listening at", server.addresses());
 
     // Print the list of endpoints

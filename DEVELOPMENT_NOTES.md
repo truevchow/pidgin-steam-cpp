@@ -75,6 +75,22 @@ https://stackoverflow.com/questions/52533396/cmake-cant-find-protobuf-protobuf-g
 
 Not that many functions immediately in libpurple plugin instantiation:
 
+[gRPC streaming client](https://stackoverflow.com/questions/71909245/how-to-use-grpc-c-clientasyncreadermessage-for-server-side-streams)
+
+#### Coroutines
+
+Avoid using multiple threads (even for gRPC completion queue), GTK hits assertions otherwise: https://github.com/DeaDBeeF-Player/deadbeef/issues/2112#issuecomment-480630111
+
+```
+Bail out! Gtk:ERROR:gtktextview.c:3571:gtk_text_view_validate_onscreen: assertion failed: (text_view->onscreen_validated)
+# (18:01:15) dummy: receive_messages done
+got completion queue event #0x4b => ok
+**
+Gtk:ERROR:gtktextview.c:3571:gtk_text_view_va
+```
+
+#### libpurple
+
 ```cpp
 	steam_list_icon,           /* list_icon */
 	steam_list_emblem,         /* list_emblems */

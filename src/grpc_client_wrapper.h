@@ -20,6 +20,12 @@ namespace SteamClient {
         INVISIBLE = 7,
     };
 
+    struct AvatarUrl {
+        std::string icon;
+        std::string medium;
+        std::string full;
+    };
+
     struct Buddy {
         std::string nickname;
         std::string id;
@@ -28,6 +34,8 @@ namespace SteamClient {
         // rich presence
         std::optional<int> gameid;
         std::string gameExtraInfo;
+
+        AvatarUrl avatarUrl;
     };
 
     struct Message {
@@ -56,6 +64,17 @@ namespace SteamClient {
         std::vector<Buddy> buddies;
     };
 
+    struct ActiveMessageSessions {
+        struct Session {
+            std::string id;
+            int64_t lastMessageTimestampNs;
+            int64_t lastViewedTimestampNs;
+            int unreadMessageCount;
+        };
+        std::vector<Session> session;
+        std::optional<int64_t> timestamp;
+    };
+
     class ClientWrapper {
         struct impl;
         std::unique_ptr<impl> pImpl;
@@ -74,6 +93,10 @@ namespace SteamClient {
                                          std::optional<int64_t> lastTimestampNs = std::nullopt);
 
         SendMessageCode sendMessage(const std::string &id, const std::string &message);
+
+        ActiveMessageSessions getActiveMessageSessions(std::optional<int64_t> sinceTimestampMs = std::nullopt);
+
+        bool ackFriendMessage(const std::string &id, int64_t timestampNs);
 
         void resetSessionKey();
 

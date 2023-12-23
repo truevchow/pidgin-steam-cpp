@@ -9,9 +9,20 @@
 template<typename T>
 class TaskCompletionSource {
 public:
-    TaskCompletionSource() = default;
+    TaskCompletionSource() {
+        m_result = std::nullopt;
+    }
+
+    TaskCompletionSource(TaskCompletionSource &) = delete;
+
+    TaskCompletionSource(TaskCompletionSource &&) noexcept = default;
+
+    TaskCompletionSource &operator=(TaskCompletionSource &) = delete;
+
+    TaskCompletionSource &operator=(TaskCompletionSource &&) noexcept = default;
 
     cppcoro::task<T> get_task() {
+        m_reset_event.set();
         co_await m_event;
         co_return std::move(*m_result);
     }
@@ -21,8 +32,14 @@ public:
         m_event.set();
     }
 
+    cppcoro::task<void> sequenced_set_result(T result) {
+        co_await m_reset_event;
+        set_result(std::move(result));
+        co_return;
+    }
+
 private:
-    cppcoro::async_auto_reset_event m_event;
+    cppcoro::async_auto_reset_event m_event, m_reset_event;
     std::optional<T> m_result;
 };
 
