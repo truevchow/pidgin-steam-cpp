@@ -94,7 +94,7 @@ namespace SteamClient {
 
         SendMessageCode sendMessage(const std::string &id, const std::string &message);
 
-        ActiveMessageSessions getActiveMessageSessions(int64_t sinceTimestampMs);
+        ActiveMessageSessions getActiveMessageSessions(std::optional<int64_t> sinceTimestampMs = std::nullopt);
 
         bool ackFriendMessage(const std::string &id, int64_t timestampNs);
 

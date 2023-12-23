@@ -87,7 +87,7 @@ message FriendsListResponse {
 
 message ActiveMessageSessionsRequest {
     string sessionKey = 1;
-    google.protobuf.Timestamp since = 2;
+    optional google.protobuf.Timestamp since = 2;
 }
 
 message ActiveMessageSession {

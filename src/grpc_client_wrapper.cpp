@@ -189,10 +189,12 @@ namespace SteamClient {
             }
         }
 
-        ActiveMessageSessions getActiveMessageSessions(int64_t sinceTimestampMs) {
+        ActiveMessageSessions getActiveMessageSessions(std::optional<int64_t> sinceTimestampMs) {
             steam::ActiveMessageSessionsRequest request;
             request.set_sessionkey(sessionKey.value());
-            request.set_allocated_since(make_timestamp_protobuf(sinceTimestampMs));
+            if (sinceTimestampMs.has_value()) {
+                request.set_allocated_since(make_timestamp_protobuf(sinceTimestampMs.value()));
+            }
 
             grpc::ClientContext context;
             steam::ActiveMessageSessionResponse response;
@@ -258,7 +260,7 @@ namespace SteamClient {
         return pImpl->sendMessage(id, message);
     }
 
-    ActiveMessageSessions ClientWrapper::getActiveMessageSessions(int64_t sinceTimestampMs) {
+    ActiveMessageSessions ClientWrapper::getActiveMessageSessions(std::optional<int64_t> sinceTimestampMs) {
         return pImpl->getActiveMessageSessions(sinceTimestampMs);
     }
 

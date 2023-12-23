@@ -323,12 +323,10 @@ function messageRoute(router: ConnectRouter) {
             var messages: ResponseMessage[] = [];
             let listener = function (message) {
                 console.log("Received friendMessage", message);
-                let senderId = message.steamid_friend.getSteamID64();
-                let timestamp = Timestamp.fromDate(message.server_timestamp);
                 let responseMessage = new ResponseMessage({
-                    senderId: senderId,
+                    senderId: message.steamid_friend.getSteamID64(),
                     message: message.message,
-                    timestamp: timestamp,
+                    timestamp: Timestamp.fromDate(message.server_timestamp),
                 });
                 console.log("Sending", responseMessage.toJson());
                 messages.push(responseMessage);
@@ -348,24 +346,26 @@ function messageRoute(router: ConnectRouter) {
             let sessionKey = call.sessionKey!;
             let wrapper = activeSessions.get(sessionKey);
             if (!wrapper) {
+                console.log("Invalid session key", sessionKey);
                 throw new Error("Invalid session key");
             }
             let client = wrapper.client;
 
-            let {
-                sessions,
-                timestamp
-            } = await client.chat.getActiveFriendMessageSessions({conversationsSince: call.since!.toDate()});
+            console.debug("Start polling active sessions");
+            let {sessions, timestamp} = await client.chat.getActiveFriendMessageSessions(
+                call.since ? {conversationsSince: call.since.toDate()} : undefined);
+            var sessionsResult = sessions.map((session) => {
+                return {
+                    targetId: session.steamid_friend.getSteamID64(),
+                    lastMessageTimestamp: Timestamp.fromDate(session.time_last_message),
+                    lastViewTimestamp: Timestamp.fromDate(session.time_last_view),
+                    unreadMessageCount: session.unread_message_count,
+                };
+            });
+            console.debug("Active sessions:", sessionsResult);
             return new ActiveMessageSessionResponse({
-                sessions: sessions.map((session) => {
-                    return {
-                        targetId: session.steamid.getSteamID64(),
-                        lastMessageTimestamp: session.time_last_message,
-                        lastViewTimestamp: session.time_last_view,
-                        unreadMessageCount: session.unread_message_count,
-                    };
-                }),
-                timestamp: timestamp
+                sessions: sessionsResult,
+                timestamp: Timestamp.fromDate(timestamp),
             });
         },
         async ackFriendMessage(call: AckFriendMessageRequest) {
