@@ -125,6 +125,12 @@ void add_buddy(SteamAccount &sa, const SteamClient::Buddy &x) {
     purple_blist_add_buddy(buddy, nullptr, purple_find_group("Steam"), nullptr);
 }
 
+SteamBuddy* getSteamBuddy(SteamAccount &sa, std::string id) {
+    auto purpleBuddy = static_cast<PurpleBuddy *>(purple_find_buddy(sa.account, id.c_str()));
+    auto steamBuddy = static_cast<SteamBuddy *>(purpleBuddy->proto_data);
+    return steamBuddy;
+}
+
 void update_buddy_info(SteamAccount &sa, const SteamClient::Buddy &friendInfo) {
     purple_debug_info("dummy", "receive_messages %s update buddy %s %s\n", sa.account->username, friendInfo.id.c_str(),
                       friendInfo.nickname.c_str());
@@ -132,11 +138,13 @@ void update_buddy_info(SteamAccount &sa, const SteamClient::Buddy &friendInfo) {
         add_buddy(sa, friendInfo);
     }
     purple_serv_got_private_alias(sa.pc, friendInfo.id.c_str(), friendInfo.nickname.c_str());
-    purple_prpl_got_user_status(sa.account, friendInfo.id.c_str(), steam_personastate_to_statustype(friendInfo.personaState), nullptr);
+    purple_prpl_got_user_status(sa.account, friendInfo.id.c_str(),
+                                steam_personastate_to_statustype(friendInfo.personaState), nullptr);
 
     auto purpleBuddy = static_cast<PurpleBuddy *>(purple_find_buddy(sa.account, friendInfo.id.c_str()));
     if (purpleBuddy->proto_data == nullptr) {
-        purpleBuddy->proto_data = new SteamBuddy{&sa, purpleBuddy, friendInfo.id, friendInfo.nickname, "", "", 0, "", 0};
+        purpleBuddy->proto_data = new SteamBuddy{
+                &sa, purpleBuddy, friendInfo.id, friendInfo.nickname, "", "", 0, "", 0};
     }
     auto steamBuddy = static_cast<SteamBuddy *>(purpleBuddy->proto_data);
     steamBuddy->gameextrainfo = friendInfo.gameExtraInfo;
@@ -144,7 +152,8 @@ void update_buddy_info(SteamAccount &sa, const SteamClient::Buddy &friendInfo) {
     steamBuddy->avatarUrl = friendInfo.avatarUrl.icon;
 }
 
-void process_messages(SteamAccount &sa, const SteamClient::Buddy &me, PurpleConversation *conv, const std::vector<SteamClient::Message> &messages,
+void process_messages(SteamAccount &sa, const SteamClient::Buddy &me, SteamBuddy *steamBuddy, PurpleConversation *conv,
+                      const std::vector<SteamClient::Message> &messages,
                       std::optional<int64_t> &newStartTimestampNs, std::optional<int64_t> &lastTimestampNs) {
     for (auto &msg: messages) {
         purple_debug_info("dummy", "receive_messages received %s\n", msg.message.c_str());
@@ -153,9 +162,12 @@ void process_messages(SteamAccount &sa, const SteamClient::Buddy &me, PurpleConv
             conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, sa.account, msg.senderId.c_str());
             purple_debug_info("dummy", "receive_messages make new conv %p\n", conv);
         }
-        purple_conversation_write(conv, msg.senderId.c_str(), html,
-                                  msg.senderId == me.id ? PURPLE_MESSAGE_SEND : PURPLE_MESSAGE_RECV,
-                                  msg.timestamp_ns / 1000000000LL);
+        time_t mtime{msg.timestamp_ns / 1000000000LL};
+        if (!steamBuddy->msgBuffer.remove(msg.message, mtime)) {
+            purple_conversation_write(conv, msg.senderId.c_str(), html,
+                                      msg.senderId == me.id ? PURPLE_MESSAGE_SEND : PURPLE_MESSAGE_RECV,
+                                      mtime);
+        }
 
         purple_debug_info("dummy", "receive_messages done\n");
         g_free(html);
@@ -166,10 +178,12 @@ void process_messages(SteamAccount &sa, const SteamClient::Buddy &me, PurpleConv
     }
 }
 
-cppcoro::task<std::optional<int64_t>> poll_friend_messages(SteamAccount &sa, const SteamClient::Buddy &me, const SteamClient::Buddy &friendInfo) {
+cppcoro::task<std::optional<int64_t>> poll_friend_messages(
+        SteamAccount &sa, const SteamClient::Buddy &me, const SteamClient::Buddy &friendInfo) {
     constexpr int max_iterations = 3;
     auto otherId = friendInfo.id;
     PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, otherId.c_str(), sa.account);
+    SteamBuddy *steamBuddy = getSteamBuddy(sa, otherId);
 
     std::optional<int64_t> lastTimestampNs, startTimestampNs;
     std::optional<int64_t> newStartTimestampNs;
@@ -181,7 +195,7 @@ cppcoro::task<std::optional<int64_t>> poll_friend_messages(SteamAccount &sa, con
         if (messages.empty()) {
             break;
         }
-        process_messages(sa, me, conv, messages, newStartTimestampNs, lastTimestampNs);
+        process_messages(sa, me, steamBuddy, conv, messages, newStartTimestampNs, lastTimestampNs);
     }
     if (newStartTimestampNs.has_value()) {
         co_await sa.client.ackFriendMessage(friendInfo.id, newStartTimestampNs.value());
@@ -204,7 +218,8 @@ cppcoro::task<void> receive_messages(SteamAccount &sa) {
         update_buddy_info(sa, friendInfo);
         auto it = sessionsById.find(friendInfo.id);
         std::cout << "receive_messages check " << friendInfo.id << " " << friendInfo.nickname << ": "
-                  << (it == sessionsById.end() ? "null" : std::to_string(it->second.lastMessageTimestampNs)) << " vs " << sa.lastMessageTimestamps[friendInfo.id] << std::endl;
+                  << (it == sessionsById.end() ? "null" : std::to_string(it->second.lastMessageTimestampNs)) << " vs "
+                  << sa.lastMessageTimestamps[friendInfo.id] << std::endl;
         if (it == sessionsById.end()) continue;
         auto session = it->second;
         if (session.lastMessageTimestampNs > sa.lastMessageTimestamps[friendInfo.id]) {
@@ -213,16 +228,20 @@ cppcoro::task<void> receive_messages(SteamAccount &sa) {
         }
     }
 
+    bool changed = false;
     auto res = co_await cppcoro::when_all(std::move(tasks));
     for (int i = 0; i < res.size(); ++i) {
         auto ts = res[i];
         auto id = taskInputs[i];
         if (ts.has_value()) {
+            changed = true;
             sa.lastMessageTimestamps[id] = ts.value();
         }
     }
 
-    write_last_timestamps(sa);
+    if (changed) {
+        write_last_timestamps(sa);
+    }
     co_return;
 }
 
@@ -237,8 +256,11 @@ gboolean step_io_service(PurpleConnection *pc) {
     return G_SOURCE_CONTINUE;
 }
 
-cppcoro::task<int> send_message(PurpleConnection *pc, SteamAccount &sa, const std::string &who, const std::string &msg) {
+cppcoro::task<int> send_message(
+        PurpleConnection *pc, SteamAccount &sa, const std::string &who, const std::string &msg) {
     purple_debug_info("dummy", "send_message with %s %s\n", who.c_str(), msg.c_str());
+    getSteamBuddy(sa, who)->msgBuffer.add(msg, time(nullptr));
+
     // TODO: better error handling
     switch (co_await sa.client.sendMessage(who, msg)) {
         case SteamClient::SEND_SUCCESS:

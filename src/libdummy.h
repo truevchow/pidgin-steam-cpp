@@ -10,8 +10,11 @@
 #include <cstring>
 #include <glib/gi18n.h>
 #include <sys/types.h>
+
 #ifdef __GNUC__
+
 #include <unistd.h>
+
 #endif
 
 #ifndef G_GNUC_NULL_TERMINATED
@@ -29,10 +32,12 @@
 #	define dlsym(a,b) GetProcAddress(a,b)
 #	define dlclose(a) FreeLibrary(a)
 #else
+
 #	include <arpa/inet.h>
 #	include <dlfcn.h>
 #	include <netinet/in.h>
 #	include <sys/socket.h>
+
 #endif
 
 #ifndef PURPLE_PLUGINS
@@ -66,6 +71,7 @@
 #include <optional>
 #include <stdexcept>
 #include <semaphore>
+#include <set>
 
 #if GLIB_MAJOR_VERSION >= 2 && GLIB_MINOR_VERSION >= 12
 #	define atoll(a) g_ascii_strtoll(a, NULL, 0)
@@ -158,6 +164,41 @@ struct SteamAccount {
     }
 };
 
+class SentMessageBuffer {
+    /*
+     * This is a buffer of messages that have been sent to the server, but have not yet been acknowledged.
+     * The buffer is used to prevent duplicate messages from being displayed in the chat window.
+     */
+    size_t _capacity;
+    int64_t _tolerance_ns;
+    std::multiset<std::pair<std::string, time_t>> _buffer;
+
+    void evict() {
+        if (_buffer.size() > _capacity) {
+            _buffer.erase(_buffer.begin());
+        }
+    }
+
+public:
+    SentMessageBuffer(size_t capacity = 5, int64_t tolerance_ns = 2000000000)
+            : _capacity(capacity), _tolerance_ns(tolerance_ns) {}
+
+    void add(std::string msg, time_t approx_time) {
+        evict();
+        _buffer.emplace(std::move(msg), approx_time);
+    }
+
+    bool remove(const std::string &msg, time_t approx_time) {
+        for (auto it = _buffer.begin(); it != _buffer.end(); ++it) {
+            if (it->first == msg && (int64_t) std::abs(it->second - approx_time) <= _tolerance_ns) {
+                _buffer.erase(it);
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
 struct SteamBuddy {
     SteamAccount *sa;
     PurpleBuddy *buddy;
@@ -175,6 +216,8 @@ struct SteamBuddy {
     std::string gameserversteamid;
     std::string lobbysteamid;
     std::string gameserverip;
+
+    SentMessageBuffer msgBuffer;
 };
 #endif
 
