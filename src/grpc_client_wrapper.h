@@ -64,6 +64,17 @@ namespace SteamClient {
         std::vector<Buddy> buddies;
     };
 
+    struct ActiveMessageSessions {
+        struct Session {
+            std::string id;
+            int64_t lastMessageTimestampNs;
+            int64_t lastViewedTimestampNs;
+            int unreadMessageCount;
+        };
+        std::vector<Session> session;
+        std::optional<int64_t> timestamp;
+    };
+
     class ClientWrapper {
         struct impl;
         std::unique_ptr<impl> pImpl;
@@ -82,6 +93,10 @@ namespace SteamClient {
                                          std::optional<int64_t> lastTimestampNs = std::nullopt);
 
         SendMessageCode sendMessage(const std::string &id, const std::string &message);
+
+        ActiveMessageSessions getActiveMessageSessions(int64_t sinceTimestampMs);
+
+        bool ackFriendMessage(const std::string &id, int64_t timestampNs);
 
         void resetSessionKey();
 

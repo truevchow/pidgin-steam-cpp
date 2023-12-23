@@ -166,6 +166,16 @@ namespace SteamClient {
             return timestamp;
         }
 
+        static google::protobuf::Timestamp *
+        make_timestamp_protobuf(int64_t timestamp_ns) {
+            auto *timestamp = new google::protobuf::Timestamp();
+            return set_timestamp_protobuf(timestamp, timestamp_ns);
+        }
+
+        static int64_t to_timestamp_ns(const google::protobuf::Timestamp &timestamp) {
+            return timestamp.seconds() * 1000000000LL + timestamp.nanos();
+        }
+
         // TODO: handle streaming responses in completion queue thread
         cppcoro::task<std::vector<Message>>
         getMessages(const std::string &id, std::optional<int64_t> startTimestampNs = std::nullopt,
@@ -174,12 +184,10 @@ namespace SteamClient {
             request.set_sessionkey(sessionKey.value());
             request.set_targetid(id);
             if (startTimestampNs.has_value()) {
-                auto *timestamp = new google::protobuf::Timestamp();
-                request.set_allocated_starttimestamp(set_timestamp_protobuf(timestamp, startTimestampNs.value()));
+                request.set_allocated_starttimestamp(make_timestamp_protobuf(startTimestampNs.value()));
             }
             if (lastTimestampNs.has_value()) {
-                auto *timestamp = new google::protobuf::Timestamp();
-                request.set_allocated_lasttimestamp(set_timestamp_protobuf(timestamp, lastTimestampNs.value()));
+                request.set_allocated_lasttimestamp(make_timestamp_protobuf(lastTimestampNs.value()));
             }
             grpc::ClientContext context;
             grpc::Status status;
@@ -200,7 +208,7 @@ namespace SteamClient {
                     Message message;
                     message.senderId = response.senderid();  // TODO: send persona info for mapping
                     message.message = response.message();
-                    message.timestamp_ns = response.timestamp().seconds() * 1000000000LL + response.timestamp().nanos();
+                    message.timestamp_ns = to_timestamp_ns(response.timestamp());
                     std::cout << "message: " << message.senderId << " " << message.message << " "
                               << message.timestamp_ns << std::endl;
                     messages.push_back(message);
@@ -244,6 +252,50 @@ namespace SteamClient {
                     co_return SEND_UNKNOWN_FAILURE;
             }
         }
+
+        cppcoro::task<ActiveMessageSessions> getActiveMessageSessions(int64_t sinceTimestampMs) {
+            steam::ActiveMessageSessionsRequest request;
+            request.set_sessionkey(sessionKey.value());
+            request.set_allocated_since(make_timestamp_protobuf(sinceTimestampMs));
+
+            grpc::ClientContext context;
+            steam::ActiveMessageSessionResponse response;
+            auto rpc = messageStub->AsyncGetActiveFriendMessageSessions(&context, request, &completionQueue);
+            if (grpc::Status status; !co_await run_call(rpc, response, status) || !status.ok()) {
+                std::cout << "GetActiveMessageSessions failed (gRPC failure)" << std::endl;
+                std::cout << status.error_code() << ": " << status.error_message() << std::endl;
+                co_return ActiveMessageSessions{{}, std::nullopt};
+            }
+
+            std::vector<ActiveMessageSessions::Session> sessions;
+            for (auto &x: response.sessions()) {
+                ActiveMessageSessions::Session session;
+                session.id = x.targetid();
+                session.lastMessageTimestampNs = to_timestamp_ns(x.lastmessagetimestamp());
+                session.lastViewedTimestampNs = to_timestamp_ns(x.lastviewtimestamp());
+                session.unreadMessageCount = x.unreadcount();
+                sessions.push_back(session);
+            }
+
+            co_return ActiveMessageSessions{sessions, {to_timestamp_ns(response.timestamp())}};
+        }
+
+        cppcoro::task<bool> ackFriendMessage(const std::string &id, int64_t timestampNs) {
+            steam::AckFriendMessageRequest request;
+            request.set_sessionkey(sessionKey.value());
+            request.set_targetid(id);
+            request.set_allocated_lasttimestamp(make_timestamp_protobuf(timestampNs));
+            grpc::ClientContext context;
+            google::protobuf::Empty response;
+            auto rpc = messageStub->AsyncAckFriendMessage(&context, request, &completionQueue);
+            if (grpc::Status status; !co_await run_call(rpc, response, status) || !status.ok()) {
+                std::cout << "AckFriendMessage failed (gRPC failure)" << std::endl;
+                std::cout << status.error_code() << ": " << status.error_message() << std::endl;
+                co_return false;
+            }
+            std::cout << "AckFriendMessage successful" << std::endl;
+            co_return true;
+        }
     };
 
     AsyncClientWrapper::~AsyncClientWrapper() = default;
@@ -278,6 +330,15 @@ namespace SteamClient {
     AsyncClientWrapper::sendMessage(const std::string &id, const std::string &message) {
         _check_session_key();
         return pImpl->sendMessage(id, message);
+    }
+
+    cppcoro::task<ActiveMessageSessions>
+    AsyncClientWrapper::getActiveMessageSessions(int64_t sinceTimestampMs) {
+        return pImpl->getActiveMessageSessions(sinceTimestampMs);
+    }
+
+    cppcoro::task<bool> AsyncClientWrapper::ackFriendMessage(const std::string &id, int64_t timestampNs) {
+        return pImpl->ackFriendMessage(id, timestampNs);
     }
 
     void AsyncClientWrapper::_check_session_key() {

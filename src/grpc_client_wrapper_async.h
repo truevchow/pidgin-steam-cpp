@@ -35,6 +35,10 @@ namespace SteamClient {
 
         cppcoro::task <SendMessageCode> sendMessage(const std::string &id, const std::string &message);
 
+        cppcoro::task <ActiveMessageSessions> getActiveMessageSessions(int64_t sinceTimestampMs);
+
+        cppcoro::task<bool> ackFriendMessage(const std::string &id, int64_t timestampNs);
+
         void resetSessionKey();
 
         bool shouldReset();

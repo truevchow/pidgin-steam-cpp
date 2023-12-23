@@ -1,12 +1,16 @@
 syntax = "proto3";
 package steam;
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
 
 // Send and receive messages from a single Steam user
 service MessageService {
     rpc SendChatMessage (MessageRequest) returns (SendMessageResult);
     rpc PollChatMessages (PollRequest) returns (stream ResponseMessage);
+    rpc StreamFriendMessages (StreamChatRequest) returns (stream ResponseMessage);
     rpc GetFriendsList (FriendsListRequest) returns (FriendsListResponse);
+    rpc GetActiveFriendMessageSessions (ActiveMessageSessionsRequest) returns (ActiveMessageSessionResponse);
+    rpc AckFriendMessage (AckFriendMessageRequest) returns (google.protobuf.Empty);
 }
 
 message MessageRequest {
@@ -34,6 +38,10 @@ message PollRequest {
     string sessionKey = 2;
     optional google.protobuf.Timestamp startTimestamp = 3;
     optional google.protobuf.Timestamp lastTimestamp = 4;
+}
+
+message StreamChatRequest {
+    string sessionKey = 1;
 }
 
 message ResponseMessage {
@@ -75,4 +83,27 @@ message Persona {
 message FriendsListResponse {
     Persona user = 1;
     repeated Persona friends = 2;
+}
+
+message ActiveMessageSessionsRequest {
+    string sessionKey = 1;
+    google.protobuf.Timestamp since = 2;
+}
+
+message ActiveMessageSession {
+    string targetId = 1;
+    google.protobuf.Timestamp lastMessageTimestamp = 2;
+    google.protobuf.Timestamp lastViewTimestamp = 3;
+    int32 unreadCount = 4;
+}
+
+message ActiveMessageSessionResponse {
+    repeated ActiveMessageSession sessions = 1;
+    google.protobuf.Timestamp timestamp = 2;
+}
+
+message AckFriendMessageRequest {
+    string sessionKey = 1;
+    string targetId = 2;
+    google.protobuf.Timestamp lastTimestamp = 3;
 }
