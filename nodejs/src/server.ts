@@ -508,8 +508,17 @@ async function main() {
         reply.send("Hello World!");
     });
 
-    await server.listen({host: "localhost", port: 8080});
-    console.log("server is listening at", server.addresses());
+    // Parse STEAM_GRPC_ADDR (e.g. "localhost:8080") with fallback
+    const grpcAddr = process.env.STEAM_GRPC_ADDR || "localhost:8080";
+    const [host, portStr] = grpcAddr.split(":");
+    const port = parseInt(portStr, 10);
+    if (isNaN(port) || port < 1 || port > 65535) {
+        throw new Error(`Invalid port in STEAM_GRPC_ADDR: "${grpcAddr}"`);
+    }
+
+    await server.listen({host, port});
+    console.log(`server is listening at ${grpcAddr}`);
+    console.log("server addresses:", server.addresses());
 
     // Print the list of endpoints
     console.log("Available endpoints:");

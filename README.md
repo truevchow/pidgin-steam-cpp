@@ -4,7 +4,7 @@ WIP. Intended to replace the now defunct https://github.com/EionRobb/pidgin-open
 
 This branch consists of:
 * Node.js server: `nodejs/src`, gRPC server as proxy to https://github.com/DoctorMcKay/node-steam-user/
-* C++ Pidgin plugin `src`: gRPC client, currently synchronous
+* C++ Pidgin plugin `src`: gRPC client (async via cppcoro)
 
 ## Build
 
@@ -28,6 +28,12 @@ npm run protobuild
 npm run start
 ```
 
+gRPC server address (optional, both plugin and sidecar honor this):
+
+```shell
+export STEAM_GRPC_ADDR=localhost:8080
+```
+
 Build Pidgin plugin:
 ```shell
 which protoc  # needs to be available in PATH
@@ -43,9 +49,8 @@ Run pidgin:
 ## TODO
 
 - [X] make gRPC client asynchronous, e.g. with cppcoro
-- [ ] fix coroutine crashes
-  - [ ] on `steam_close`
-  - [ ] use multithreading for gRPC client
+- [X] fix coroutine crashes
+  - [X] on `steam_close`
 - [ ] More robust handling of gRPC errors
 - [ ] cleanups
   - [ ] better build system?

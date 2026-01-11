@@ -58,6 +58,7 @@
 #include "version.h"
 #include "grpc_client_wrapper.h"
 #include "grpc_client_wrapper_async.h"
+#include "environ.h"
 #include "cppcoro/async_scope.hpp"
 #include "cppcoro/io_service.hpp"
 #include "cppcoro/cancellation_source.hpp"
@@ -147,7 +148,8 @@ struct SteamAccount {
     std::map<std::string, int64_t> lastMessageTimestamps;  // TODO: refactor to per-buddy state
 
     // for stub implementation
-    SteamClient::AsyncClientWrapper client{"localhost:8080"};
+    std::string grpcAddress;
+    SteamClient::AsyncClientWrapper client;
     guint poll_callback_id;
     cppcoro::cancellation_source cancelTokenSource;
     cppcoro::cancellation_token cancelToken;
@@ -157,6 +159,10 @@ struct SteamAccount {
     std::atomic<bool> closing{false};
     std::atomic<bool> grpcShutdownStarted{false};
     std::atomic<bool> shutdownComplete{false};
+
+    SteamAccount()
+        : grpcAddress(EnvVars::get("STEAM_GRPC_ADDR")().value_or("localhost:8080")),
+          client(grpcAddress) {}
 
     // custom memory allocator
     static void *operator new(size_t size) {
