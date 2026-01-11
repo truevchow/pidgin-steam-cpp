@@ -10,20 +10,58 @@ add_subdirectory(third_party/cppcoro)
 add_subdirectory(third_party/jsoncpp)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBPURPLE REQUIRED glib-2.0 json-glib-1.0 purple libsecret-1 zlib)
+pkg_check_modules(LIBPURPLE REQUIRED glib-2.0 purple zlib)
+pkg_check_modules(GRPC REQUIRED IMPORTED_TARGET grpc)
+pkg_check_modules(GRPCPP REQUIRED IMPORTED_TARGET grpc++)
 
 set(CPPCORO_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cppcoro/include)
 
 # Find the protobuf package
 # find_package(protobuf CONFIG REQUIRED)
-#find_package(Protobuf REQUIRED)
-find_package(gRPC CONFIG REQUIRED)
+find_package(Protobuf REQUIRED)
+
 
 # Generate C++ code from the .proto file
 set(PROTO_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/protobufs")
-set(PROTO_GEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/protobufs")
+set(PROTO_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/protobufs")
 set(PROTO_IMPORT_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/protobufs_src")
 file(GLOB PROTO_IMPORT_FILES "${CMAKE_CURRENT_SOURCE_DIR}/protobufs_src/comm_protobufs/*.proto")
+
+find_program(GRPC_CPP_PLUGIN_EXECUTABLE grpc_cpp_plugin REQUIRED)
+file(MAKE_DIRECTORY "${PROTO_GEN_DIR}")
+
+file(GLOB PROTO_REL_FILES RELATIVE "${PROTO_IMPORT_DIRS}" "${PROTO_IMPORT_DIRS}/comm_protobufs/*.proto")
+set(PROTO_GEN_SRCS "")
+set(PROTO_GEN_HDRS "")
+
+foreach(PROTO_FILE ${PROTO_REL_FILES})
+    get_filename_component(PROTO_DIR "${PROTO_FILE}" DIRECTORY)
+    get_filename_component(PROTO_BASENAME "${PROTO_FILE}" NAME_WE)
+
+    set(GEN_PB_CC "${PROTO_GEN_DIR}/${PROTO_DIR}/${PROTO_BASENAME}.pb.cc")
+    set(GEN_PB_H  "${PROTO_GEN_DIR}/${PROTO_DIR}/${PROTO_BASENAME}.pb.h")
+    set(GEN_GRPC_CC "${PROTO_GEN_DIR}/${PROTO_DIR}/${PROTO_BASENAME}.grpc.pb.cc")
+    set(GEN_GRPC_H  "${PROTO_GEN_DIR}/${PROTO_DIR}/${PROTO_BASENAME}.grpc.pb.h")
+
+    list(APPEND PROTO_GEN_SRCS "${GEN_PB_CC}" "${GEN_GRPC_CC}")
+    list(APPEND PROTO_GEN_HDRS "${GEN_PB_H}" "${GEN_GRPC_H}")
+
+    add_custom_command(
+            OUTPUT "${GEN_PB_CC}" "${GEN_PB_H}" "${GEN_GRPC_CC}" "${GEN_GRPC_H}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${PROTO_GEN_DIR}/${PROTO_DIR}"
+            COMMAND "${Protobuf_PROTOC_EXECUTABLE}"
+                    -I "${PROTO_IMPORT_DIRS}"
+                    --cpp_out=${PROTO_GEN_DIR}
+                    --grpc_out=${PROTO_GEN_DIR}
+                    --plugin=protoc-gen-grpc=${GRPC_CPP_PLUGIN_EXECUTABLE}
+                    "${PROTO_FILE}"
+            DEPENDS "${PROTO_IMPORT_DIRS}/${PROTO_FILE}"
+            COMMENT "Generating protobuf/grpc sources for ${PROTO_FILE}"
+            VERBATIM
+    )
+endforeach()
+
+add_custom_target(generate_protos DEPENDS ${PROTO_GEN_SRCS} ${PROTO_GEN_HDRS})
 
 #set(Protobuf_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/protobufs_src/comm_protobufs")
 #set(Protobuf_INCLUDE_DIRS "${Protobuf_INCLUDE_DIRS}/protobufs_gen")
@@ -31,19 +69,22 @@ file(GLOB PROTO_IMPORT_FILES "${CMAKE_CURRENT_SOURCE_DIR}/protobufs_src/comm_pro
 #set_source_files_properties(${PROTO_SRCS} ${PROTO_HDRS} PROPERTIES GENERATED TRUE)
 
 add_library(grpc_wrapper
-        ${PROTO_IMPORT_FILES}
         src/grpc_client_wrapper.cpp src/grpc_client_wrapper.h
-        ${PROTO_GEN_FILES}
+        ${PROTO_GEN_SRCS}
+        ${PROTO_GEN_HDRS}
         src/grpc_client_wrapper_async.cpp
         src/grpc_client_wrapper_async.h
         ${CPPCORO_INCLUDE_DIR}
 )
 target_link_libraries(grpc_wrapper
-        ${Protobuf_LIBRARIES}
-        gRPC::grpc++
+        protobuf::libprotobuf
+        PkgConfig::GRPC
+        PkgConfig::GRPCPP
         cppcoro
 )
 set_target_properties(grpc_wrapper PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+add_dependencies(grpc_wrapper generate_protos)
 
 target_include_directories(grpc_wrapper PUBLIC
         "$<BUILD_INTERFACE:${PROTO_GEN_DIR}>"
@@ -64,41 +105,8 @@ target_link_libraries(grpc_experiment
         grpc_wrapper
 )
 
-#protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${PROTO_IMPORT_FILES})
-#protobuf_generate_grpc_cpp(PROTO_GRPC_SRCS PROTO_GRPC_HDRS ${PROTO_IMPORT_FILES})
-get_target_property(grpc_cpp_plugin_location gRPC::grpc_cpp_plugin LOCATION)
-
-protobuf_generate(
-        TARGET grpc_wrapper
-        IMPORT_DIRS ${PROTO_IMPORT_DIRS}
-        PROTOC_OUT_DIR "${PROTO_GEN_DIR}"
-)
-protobuf_generate(
-    TARGET grpc_wrapper
-    LANGUAGE grpc
-    GENERATE_EXTENSIONS .grpc.pb.h .grpc.pb.cc
-    #        PLUGIN "protoc-gen-grpc=\$<TARGET_FILE:gRPC::grpc_cpp_plugin>"
-    PLUGIN "protoc-gen-grpc=${grpc_cpp_plugin_location}"
-    IMPORT_DIRS ${PROTO_IMPORT_DIRS}
-    PROTOC_OUT_DIR "${PROTO_GEN_DIR}"
-)
-
-#file(GLOB_RECURSE PROTO_SRCS CONFIGURE_DEPENDS "${PROTO_IMPORT_DIRS}/*.proto")
-#add_custom_target(protobuf_generation ALL
-#    COMMAND ${CMAKE_COMMAND} -E echo "Generating protobuf files"
-#    COMMAND ${CMAKE_COMMAND} -E make_directory "${PROTO_GEN_DIR}"
-#    COMMAND protoc --proto_path=${PROTO_IMPORT_DIRS} --cpp_out=${PROTO_GEN_DIR} --grpc_out=${PROTO_GEN_DIR} --plugin=protoc-gen-grpc=${grpc_cpp_plugin_location} ${PROTO_SRCS}
-#    DEPENDS ${PROTO_SRCS}
-#)
-# add_dependencies(grpc_wrapper protobuf_generation)
-
-file(GLOB PROTO_GEN_SRCS "${PROTO_GEN_DIRS}/*.pb.cc")
-file(GLOB PROTO_GEN_HDRS "${PROTO_GEN_DIRS}/*.pb.h")
-
-#protobuf_generate(TARGET pidgin_steam LANGUAGE cpp)
-#protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS "${CMAKE_CURRENT_SOURCE_DIR}/protobufs/comm_protobufs" ${PROTO_IMPORT_FILES})
 set_source_files_properties(${PROTO_GEN_SRCS} ${PROTO_GEN_HDRS} PROPERTIES GENERATED TRUE)
-message("Protobuf_INCLUDE_DIRS: ${Protobuf_INCLUDE_DIRS}")
+message(STATUS "Protobuf include dirs: ${Protobuf_INCLUDE_DIRS}")
 
 # add_executable(pidgin_steam
 #         src/steam_rsa.cpp src/libdummy.cpp src/libdummy.h)
@@ -106,7 +114,6 @@ add_library(pidgin_steam SHARED
         #        src/steam_rsa.cpp
         src/libdummy.cpp src/libdummy.h
         src/coro_utils.h
-        ${Protobuf_LIBRARIES}
         src/grpc_client_wrapper.h
 )
 

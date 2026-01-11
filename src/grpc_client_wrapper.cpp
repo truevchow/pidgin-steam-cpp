@@ -1,10 +1,10 @@
 #include "grpc_client_wrapper.h"
 #include <grpcpp/grpcpp.h>
 
-#include "../protobufs/comm_protobufs/message.pb.h"
-#include "../protobufs/comm_protobufs/message.grpc.pb.h"
-#include "../protobufs/comm_protobufs/auth.pb.h"
-#include "../protobufs/comm_protobufs/auth.grpc.pb.h"
+#include "comm_protobufs/message.pb.h"
+#include "comm_protobufs/message.grpc.pb.h"
+#include "comm_protobufs/auth.pb.h"
+#include "comm_protobufs/auth.grpc.pb.h"
 
 namespace SteamClient {
     struct ClientWrapper::impl {

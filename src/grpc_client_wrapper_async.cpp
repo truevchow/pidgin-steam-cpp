@@ -4,10 +4,10 @@
 #include <grpcpp/grpcpp.h>
 #include <atomic>
 #include <thread>
-#include "../protobufs/comm_protobufs/message.pb.h"
-#include "../protobufs/comm_protobufs/message.grpc.pb.h"
-#include "../protobufs/comm_protobufs/auth.pb.h"
-#include "../protobufs/comm_protobufs/auth.grpc.pb.h"
+#include "comm_protobufs/message.pb.h"
+#include "comm_protobufs/message.grpc.pb.h"
+#include "comm_protobufs/auth.pb.h"
+#include "comm_protobufs/auth.grpc.pb.h"
 #include "cppcoro/sync_wait.hpp"
 #include "cppcoro/io_service.hpp"
 
