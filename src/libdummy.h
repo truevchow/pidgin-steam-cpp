@@ -63,13 +63,13 @@
 #include "cppcoro/cancellation_source.hpp"
 #include <sys/stat.h>
 
-
 #include <fcntl.h>
 #include <type_traits>
 #include <string>
 #include <map>
 #include <optional>
 #include <stdexcept>
+#include <atomic>
 #include <semaphore>
 #include <set>
 
@@ -153,6 +153,10 @@ struct SteamAccount {
     cppcoro::cancellation_token cancelToken;
     cppcoro::async_scope scope;
     cppcoro::io_service ioService;
+
+    std::atomic<bool> closing{false};
+    std::atomic<bool> grpcShutdownStarted{false};
+    std::atomic<bool> shutdownComplete{false};
 
     // custom memory allocator
     static void *operator new(size_t size) {

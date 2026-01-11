@@ -68,24 +68,24 @@ static void steam_close(PurpleConnection *pc) {
     purple_debug_info("dummy", "steam_close start\n");
     auto *sa = static_cast<SteamAccount *>(pc->proto_data);
 
-    sa->cancelTokenSource.request_cancellation();
-    purple_timeout_remove(sa->poll_callback_id);
+    if (sa == nullptr) {
+        return;
+    }
 
-    std::thread([=]() {
-        std::atomic<bool> done = false;
-        std::thread pump_thread([&done, sa]() {
-            while (!done) {
-                sa->ioService.process_pending_events();
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
-        });
-        cppcoro::sync_wait(sa->scope.join());  // TODO: check if this deadlocks
-        sa->client.shutdown();  // TODO: still see "ASSERTION FAILED: grpc_cq_begin_op(cq_, notify_tag)" sometimes
-        done = true;
-        pump_thread.join();
-        sa->ioService.stop();
-        delete sa;
-        purple_debug_info("dummy", "steam_close done\n");
+    bool expected = false;
+    if (!sa->closing.compare_exchange_strong(expected, true)) {
+        return;
+    }
+
+    sa->cancelTokenSource.request_cancellation();
+
+    if (!sa->grpcShutdownStarted.exchange(true)) {
+        sa->client.shutdown();
+    }
+
+    std::thread([sa]() {
+        cppcoro::sync_wait(sa->scope.join());
+        sa->shutdownComplete = true;
     }).detach();
 }
 
@@ -191,6 +191,9 @@ cppcoro::task<std::optional<int64_t>> poll_friend_messages(
         newStartTimestampNs = startTimestampNs = it->second;
     }
     for (int i = 0; i < max_iterations; ++i) {
+        if (sa.cancelToken.is_cancellation_requested()) {
+            co_return std::nullopt;
+        }
         auto messages = co_await sa.client.getMessages(friendInfo.id, startTimestampNs, lastTimestampNs);
         if (messages.empty()) {
             break;
@@ -198,13 +201,23 @@ cppcoro::task<std::optional<int64_t>> poll_friend_messages(
         process_messages(sa, me, steamBuddy, conv, messages, newStartTimestampNs, lastTimestampNs);
     }
     if (newStartTimestampNs.has_value()) {
+        if (sa.cancelToken.is_cancellation_requested()) {
+            co_return std::nullopt;
+        }
         co_await sa.client.ackFriendMessage(friendInfo.id, newStartTimestampNs.value());
     }
     co_return newStartTimestampNs;
 }
 
 cppcoro::task<void> receive_messages(SteamAccount &sa) {
+    if (sa.cancelToken.is_cancellation_requested()) {
+        co_return;
+    }
     auto [me, buddies] = co_await sa.client.getFriendsList();  // TODO: store in SteamAccount
+
+    if (sa.cancelToken.is_cancellation_requested()) {
+        co_return;
+    }
 
     auto [sessions, timestamp] = co_await sa.client.getActiveMessageSessions();
     std::map<std::string, SteamClient::ActiveMessageSessions::Session> sessionsById;
@@ -215,6 +228,9 @@ cppcoro::task<void> receive_messages(SteamAccount &sa) {
     std::vector<cppcoro::task<std::optional<int64_t>>> tasks;
     std::vector<std::string> taskInputs;
     for (auto &friendInfo: buddies) {
+        if (sa.cancelToken.is_cancellation_requested()) {
+            co_return;
+        }
         update_buddy_info(sa, friendInfo);
         auto it = sessionsById.find(friendInfo.id);
         std::cout << "receive_messages check " << friendInfo.id << " " << friendInfo.nickname << ": "
@@ -247,11 +263,25 @@ cppcoro::task<void> receive_messages(SteamAccount &sa) {
 
 gboolean step_io_service(PurpleConnection *pc) {
     // purple_debug_info("dummy", "step_io_service start %p\n", pc);
-    SteamAccount &sa = *static_cast<SteamAccount *>(pc->proto_data);
-    if (sa.cancelToken.is_cancellation_requested()) {
+    auto *saPtr = static_cast<SteamAccount *>(pc->proto_data);
+    if (saPtr == nullptr) {
         return G_SOURCE_REMOVE;
     }
+    SteamAccount &sa = *saPtr;
+
     sa.ioService.process_pending_events();
+
+    if (sa.closing.load() && sa.shutdownComplete.load()) {
+        sa.ioService.stop();
+        pc->proto_data = nullptr;
+        delete saPtr;
+        purple_debug_info("dummy", "steam_close done\n");
+        return G_SOURCE_REMOVE;
+    }
+
+    if (!sa.closing.load() && sa.cancelToken.is_cancellation_requested()) {
+        return G_SOURCE_REMOVE;
+    }
     // purple_debug_info("dummy", "step_io_service end %p\n", pc);
     return G_SOURCE_CONTINUE;
 }
@@ -259,6 +289,10 @@ gboolean step_io_service(PurpleConnection *pc) {
 cppcoro::task<int> send_message(
         PurpleConnection *pc, SteamAccount &sa, const std::string &who, const std::string &msg) {
     purple_debug_info("dummy", "send_message with %s %s\n", who.c_str(), msg.c_str());
+
+    if (sa.cancelToken.is_cancellation_requested()) {
+        co_return -ECANCELED;
+    }
     getSteamBuddy(sa, who)->msgBuffer.add(msg, time(nullptr));
 
     // TODO: better error handling
@@ -436,6 +470,10 @@ static unsigned int steam_send_typing(PurpleConnection *pc, const gchar *name, P
 cppcoro::task<void> attempt_login(PurpleConnection *pc, SteamAccount &sa) {
     purple_debug_info("debug", "steam_login with creds %s\n", sa.username.c_str());
 
+    if (sa.cancelToken.is_cancellation_requested()) {
+        co_return;
+    }
+
     purple_connection_set_state(pc, PURPLE_CONNECTING);
     purple_connection_update_progress(pc, _("Connecting"), 1, 3);
 
@@ -445,6 +483,9 @@ cppcoro::task<void> attempt_login(PurpleConnection *pc, SteamAccount &sa) {
     }
 
     for (int i = 0; i < 2; ++i) {
+        if (sa.cancelToken.is_cancellation_requested()) {
+            co_return;
+        }
         purple_debug_info("dummy", "steam_login authenticate attempt %d\n", i);
         // TODO: verify auth flow
         // TODO: wait for Steam Guard code (since Steam will send an email with a new code for each login attempt)

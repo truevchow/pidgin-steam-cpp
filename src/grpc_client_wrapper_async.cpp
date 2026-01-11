@@ -53,8 +53,11 @@ namespace SteamClient {
                     continue;
                 }
                 // std::cout << "got completion queue event #" << tag << " => " << (ok ? "ok" : "not ok") << std::endl;
-                auto &token = callbacks.at(reinterpret_cast<size_t>(tag));
-                co_await token.sequenced_set_result(ok);
+                auto it = callbacks.find(reinterpret_cast<size_t>(tag));
+                if (it == callbacks.end()) {
+                    continue;
+                }
+                co_await it->second.sequenced_set_result(ok);
             }
             std::cout << "stopping completion queue" << std::endl;
             co_return;
@@ -62,6 +65,9 @@ namespace SteamClient {
 
         template<typename Rpc, typename Response>
         cppcoro::task<bool> run_call(Rpc &rpc, Response &response, grpc::Status &status) {
+            if (_shutdown.load()) {
+                co_return false;
+            }
             auto tag = tagCounter++;
             auto &token = callbacks.emplace(std::piecewise_construct, std::forward_as_tuple(tag),
                                             std::forward_as_tuple()).first->second;
@@ -74,6 +80,9 @@ namespace SteamClient {
         cppcoro::task<std::tuple<AuthResponseState, std::string>>
         _authenticate(const std::string &username, const std::string &password,
                       const std::optional<std::string> &steamGuardCode) {
+            if (_shutdown.load()) {
+                co_return std::make_tuple(AUTH_UNKNOWN_FAILURE, "");
+            }
             steam::AuthRequest request;
             request.set_username(username);
             request.set_password(password);
@@ -137,6 +146,9 @@ namespace SteamClient {
         }
 
         cppcoro::task<FriendsList> getFriendsList() {
+            if (_shutdown.load()) {
+                co_return FriendsList{std::nullopt, {}};
+            }
             steam::FriendsListRequest request;
             request.set_sessionkey(sessionKey.value());
 
@@ -199,6 +211,9 @@ namespace SteamClient {
             std::vector<Message> messages;
             if (co_await token.get_task()) {  // StartCall response
                 while (true) {
+                    if (_shutdown.load()) {
+                        break;
+                    }
                     steam::ResponseMessage response;
                     stream->Read(&response, reinterpret_cast<void *>(tag));
                     if (!co_await token.get_task()) {
@@ -213,15 +228,20 @@ namespace SteamClient {
                               << message.timestamp_ns << std::endl;
                     messages.push_back(message);
                 }
-            } else {
-                stream->Finish(&status, reinterpret_cast<void *>(tag));
             }
-            // TODO: check exception handling
+
+            if (!_shutdown.load()) {
+                stream->Finish(&status, reinterpret_cast<void *>(tag));
+                co_await token.get_task();
+            }
             callbacks.erase(tag);
             co_return messages;
         }
 
         cppcoro::task<SendMessageCode> sendMessage(const std::string &id, const std::string &message) {
+            if (_shutdown.load()) {
+                co_return SEND_UNKNOWN_FAILURE;
+            }
             steam::MessageRequest request;
             request.set_sessionkey(sessionKey.value());
             request.set_targetid(id);
@@ -254,6 +274,9 @@ namespace SteamClient {
         }
 
         cppcoro::task<ActiveMessageSessions> getActiveMessageSessions(std::optional<int64_t> sinceTimestampMs) {
+            if (_shutdown.load()) {
+                co_return ActiveMessageSessions{{}, std::nullopt};
+            }
             steam::ActiveMessageSessionsRequest request;
             request.set_sessionkey(sessionKey.value());
             if (sinceTimestampMs.has_value()) {
@@ -283,6 +306,9 @@ namespace SteamClient {
         }
 
         cppcoro::task<bool> ackFriendMessage(const std::string &id, int64_t timestampNs) {
+            if (_shutdown.load()) {
+                co_return false;
+            }
             steam::AckFriendMessageRequest request;
             request.set_sessionkey(sessionKey.value());
             request.set_targetid(id);
