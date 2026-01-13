@@ -72,6 +72,8 @@ class AuthWrapper {
 
     constructor(private transport: any) {
         this.client = createPromiseClient(AuthService, this.transport);
+        // Initialize sessionKey from environment variable if available
+        this.sessionKey = process.env.STEAM_SESSION_KEY;
     }
 
     private readRefreshTokens(): any {
@@ -104,54 +106,63 @@ class AuthWrapper {
     }
 
     public async login() {
-        await this._login();
-        return this.sessionKey!;
+        this.sessionKey = await this._login();
+        return this.sessionKey;
     }
 
-    private async _login() {
+    private async _login(): Promise<string> {
         console.log("Session key:", this.sessionKey);
-        let username = await genericPrompt("username", process.env.STEAM_USERNAME);
-        let password = await passwordPrompt(process.env.STEAM_PASSWORD);
-        var steamGuardCode: string | undefined;
+        const username = await genericPrompt("username", process.env.STEAM_USERNAME);
+        const password = await passwordPrompt(process.env.STEAM_PASSWORD);
 
-        // Try auth once with refresh token
         const refreshTokens = this.readRefreshTokens();
         const refreshToken = refreshTokens[username];
         if (refreshToken) {
             console.log("Using refresh token");
             const res = await this.client.authenticate({
-                username: username,
-                refreshToken: refreshToken,
+                username,
+                refreshToken,
+                sessionKey: this.sessionKey,
             });
-            if (res.reason == AuthResponse_AuthState.SUCCESS) {
-                console.log("Successfully logged on");
+            if (res.sessionKey) {
                 this.sessionKey = res.sessionKey;
+            }
+            if (res.reason === AuthResponse_AuthState.SUCCESS) {
+                console.log("Successfully logged on");
                 this.updateRefreshTokens(refreshTokens, username, res.refreshToken);
-                return;
+                return this.sessionKey!;
             }
         }
 
+        let steamGuardCode: string | undefined;
         for (let tries = 1; tries <= 3; tries++) {
             console.log("Attempt", tries, "with session key", this.sessionKey);
             const res = await this.client.authenticate({
-                username: username,
-                password: password,
-                steamGuardCode: steamGuardCode,
+                username,
+                password,
+                steamGuardCode,
                 sessionKey: this.sessionKey,
             });
-            console.log("Got session key:", res.sessionKey);
-            this.sessionKey = res.sessionKey;
-            if (res.reason == AuthResponse_AuthState.STEAM_GUARD_CODE_REQUEST) {
+            if (res.sessionKey) {
+                this.sessionKey = res.sessionKey;
+            }
+            console.log("Got session key:", this.sessionKey);
+
+            if (res.reason === AuthResponse_AuthState.STEAM_GUARD_CODE_REQUEST) {
                 steamGuardCode = await genericPrompt("Steam guard code");
-            } else if (res.reason == AuthResponse_AuthState.INVALID_CREDENTIALS) {
+                continue;
+            }
+            if (res.reason === AuthResponse_AuthState.INVALID_CREDENTIALS) {
                 console.log("Invalid credentials!");
                 throw new Error("Invalid credentials");
-            } else if (res.reason == AuthResponse_AuthState.SUCCESS) {
+            }
+            if (res.reason === AuthResponse_AuthState.SUCCESS) {
                 console.log("Successfully logged on");
                 this.updateRefreshTokens(refreshTokens, username, res.refreshToken);
-                break;
+                return this.sessionKey!;
             }
         }
+
         console.log("Too many tries!");
         throw new Error("Too many tries");
     }
@@ -207,7 +218,7 @@ class MessageClient {
 
 const transport = createConnectTransport({
     httpVersion: "2",
-    baseUrl: "http://localhost:8080/",
+    baseUrl: process.env.STEAM_GRPC_ADDR || "http://localhost:8080/",
 });
 
 async function main() {

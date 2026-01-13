@@ -25,6 +25,7 @@ namespace SteamClient {
         SteamClient::AuthResponseState lastAuthResponseState = AUTH_UNKNOWN_FAILURE;
         bool lastSuccessState = false;
         std::optional<std::string> sessionKey;
+        std::optional<std::string> refreshToken;
 
         explicit impl(const std::string &address) {
             channel = grpc::CreateChannel(address, grpc::InsecureChannelCredentials());
@@ -77,17 +78,21 @@ namespace SteamClient {
             co_return ok;
         }
 
-        cppcoro::task<std::tuple<AuthResponseState, std::string>>
+        cppcoro::task<std::tuple<AuthResponseState, std::string, std::optional<std::string>>>
         _authenticate(const std::string &username, const std::string &password,
-                      const std::optional<std::string> &steamGuardCode) {
+                      const std::optional<std::string> &steamGuardCode,
+                      const std::optional<std::string> &refreshToken) {
             if (_shutdown.load()) {
-                co_return std::make_tuple(AUTH_UNKNOWN_FAILURE, "");
+                co_return std::make_tuple(AUTH_UNKNOWN_FAILURE, "", std::nullopt);
             }
             steam::AuthRequest request;
             request.set_username(username);
             request.set_password(password);
             if (steamGuardCode.has_value()) {
                 request.set_steamguardcode(steamGuardCode.value());
+            }
+            if (refreshToken.has_value()) {
+                request.set_refreshtoken(refreshToken.value());
             }
             if (sessionKey.has_value()) {
                 request.set_sessionkey(sessionKey.value());
@@ -99,39 +104,48 @@ namespace SteamClient {
             if (grpc::Status status; !co_await run_call(rpc, response, status) || !status.ok()) {
                 std::cout << "Auth failed (gRPC failure)" << std::endl;
                 std::cout << status.error_code() << ": " << status.error_message() << std::endl;
-                co_return std::make_tuple(AUTH_UNKNOWN_FAILURE, "");
+                co_return std::make_tuple(AUTH_UNKNOWN_FAILURE, "", std::nullopt);
+            }
+
+            std::optional<std::string> newRefreshToken;
+            if (response.has_refreshtoken()) {
+                newRefreshToken = response.refreshtoken();
             }
 
             switch (response.reason()) {
                 case steam::AuthResponse_AuthState_SUCCESS:
                     std::cout << "Auth successful" << std::endl;
                     std::cout << "Session key " << response.sessionkey() << std::endl;
-                    co_return std::make_tuple(AUTH_SUCCESS, response.sessionkey());
+                    co_return std::make_tuple(AUTH_SUCCESS, response.sessionkey(), newRefreshToken);
                 case steam::AuthResponse_AuthState_INVALID_CREDENTIALS:
                     std::cout << "Auth failed (invalid credentials)" << std::endl;
-                    co_return std::make_tuple(AUTH_INVALID_CREDENTIALS, response.sessionkey());
+                    co_return std::make_tuple(AUTH_INVALID_CREDENTIALS, response.sessionkey(), std::nullopt);
                 case steam::AuthResponse_AuthState_STEAM_GUARD_CODE_REQUEST:
                     std::cout << "Auth failed (pending Steam Guard code)" << std::endl;
-                    co_return std::make_tuple(AUTH_PENDING_STEAM_GUARD_CODE, response.sessionkey());
+                    co_return std::make_tuple(AUTH_PENDING_STEAM_GUARD_CODE, response.sessionkey(), std::nullopt);
                 default:
                     std::cout << "Auth failed (unknown failure)" << std::endl;
-                    co_return std::make_tuple(AUTH_UNKNOWN_FAILURE, response.sessionkey());
+                    co_return std::make_tuple(AUTH_UNKNOWN_FAILURE, response.sessionkey(), std::nullopt);
             }
         }
 
         cppcoro::task<AuthResponseState>
         authenticate(const std::string &username, const std::string &password,
-                     const std::optional<std::string> &steamGuardCode) {
-            auto [state, newSessionKey] = co_await _authenticate(username, password, steamGuardCode);
+                     const std::optional<std::string> &steamGuardCode,
+                     const std::optional<std::string> &refreshToken) {
+            auto [state, newSessionKey, newRefreshToken] = co_await _authenticate(username, password, steamGuardCode,
+                                                                                  refreshToken);
             this->lastAuthResponseState = state;
             switch (state) {
                 case AUTH_SUCCESS:
                     this->lastSuccessState = true;
                     this->sessionKey = newSessionKey;
+                    this->refreshToken = newRefreshToken;
                     break;
                 case AUTH_INVALID_CREDENTIALS:
                     this->lastSuccessState = false;
                     this->sessionKey = std::nullopt;
+                    this->refreshToken = std::nullopt;
                     break;
                 case AUTH_PENDING_STEAM_GUARD_CODE:
                     this->lastSuccessState = true;
@@ -140,6 +154,7 @@ namespace SteamClient {
                 case AUTH_UNKNOWN_FAILURE:
                     this->lastSuccessState = false;
                     this->sessionKey = std::nullopt;
+                    this->refreshToken = std::nullopt;
                     break;
             }
             co_return state;
@@ -338,8 +353,9 @@ namespace SteamClient {
 
     cppcoro::task<AuthResponseState>
     AsyncClientWrapper::authenticate(const std::string &username, const std::string &password,
-                                     const std::optional<std::string> &steamGuardCode) {
-        return pImpl->authenticate(username, password, steamGuardCode);
+                                     const std::optional<std::string> &steamGuardCode,
+                                     const std::optional<std::string> &refreshToken) {
+        return pImpl->authenticate(username, password, steamGuardCode, refreshToken);
     }
 
     cppcoro::task<FriendsList> AsyncClientWrapper::getFriendsList() {
@@ -379,12 +395,24 @@ namespace SteamClient {
         pImpl->sessionKey = std::nullopt;
     }
 
+    void AsyncClientWrapper::setSessionKey(const std::string &value) {
+        pImpl->sessionKey = value;
+    }
+
     bool AsyncClientWrapper::shouldReset() {
         return !pImpl->lastSuccessState;
     }
 
     bool AsyncClientWrapper::isSessionKeySet() {
-        return pImpl->sessionKey.has_value();
+        return pImpl->sessionKey.has_value() && pImpl->lastAuthResponseState == AUTH_SUCCESS;
+    }
+
+    std::optional<std::string> AsyncClientWrapper::getSessionKey() {
+        return pImpl->sessionKey;
+    }
+
+    std::optional<std::string> AsyncClientWrapper::getRefreshToken() {
+        return pImpl->refreshToken;
     }
 
     AsyncClientWrapper::AsyncClientWrapper::AsyncClientWrapper(const std::string &address) {

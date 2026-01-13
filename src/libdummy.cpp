@@ -213,6 +213,9 @@ cppcoro::task<void> receive_messages(SteamAccount &sa) {
     if (sa.cancelToken.is_cancellation_requested()) {
         co_return;
     }
+    if (!sa.client.isSessionKeySet()) {
+        co_return;
+    }
     auto [me, buddies] = co_await sa.client.getFriendsList();  // TODO: store in SteamAccount
 
     if (sa.cancelToken.is_cancellation_requested()) {
@@ -482,31 +485,66 @@ cppcoro::task<void> attempt_login(PurpleConnection *pc, SteamAccount &sa) {
         sa.client.resetSessionKey();
     }
 
-    for (int i = 0; i < 2; ++i) {
+    while (true) {
         if (sa.cancelToken.is_cancellation_requested()) {
             co_return;
         }
-        purple_debug_info("dummy", "steam_login authenticate attempt %d\n", i);
-        // TODO: verify auth flow
-        // TODO: wait for Steam Guard code (since Steam will send an email with a new code for each login attempt)
-        res = co_await sa.client.authenticate(sa.username, sa.password, sa.steamGuardCode);
+
+        purple_debug_info("dummy", "steam_login authenticate\n");
+        try {
+            res = co_await sa.client.authenticate(sa.username, sa.password, sa.steamGuardCode, sa.refreshToken);
+        } catch (const std::exception &ex) {
+            purple_debug_info("dummy", "steam_login authenticate exception %s\n", ex.what());
+            purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
+                                           "Unknown error");
+            co_return;
+        }
+
         switch (res) {
-            case SteamClient::AUTH_SUCCESS:
+            case SteamClient::AUTH_SUCCESS: {
+                for (int i = 0; i < 10; ++i) {
+                    if (auto rt = sa.client.getRefreshToken(); rt.has_value() && !rt->empty()) {
+                        sa.refreshToken = rt.value();
+                        purple_account_set_string(sa.account, "refreshToken", rt->c_str());
+                        break;
+                    }
+                    co_await sa.ioService.schedule_after(std::chrono::milliseconds(500));
+                    try {
+                        (void) co_await sa.client.authenticate(sa.username, sa.password, std::nullopt, std::nullopt);
+                    } catch (...) {
+                        break;
+                    }
+                }
+                purple_account_set_string(sa.account, "steam_guard_code", "");
+                purple_account_set_string(sa.account, "sessionKey", "");
                 purple_debug_info("dummy", "steam_login authenticate success\n");
                 purple_connection_set_state(pc, PURPLE_CONNECTED);
                 purple_connection_update_progress(pc, _("Connected"), 2, 3);
                 co_return;
+            }
             case SteamClient::AUTH_INVALID_CREDENTIALS:
                 purple_debug_info("dummy", "steam_login authenticate invalid credentials\n");
                 purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
                                                "Invalid username or password");
                 co_return;
-            case SteamClient::AUTH_PENDING_STEAM_GUARD_CODE:
+            case SteamClient::AUTH_PENDING_STEAM_GUARD_CODE: {
+                if (auto sk = sa.client.getSessionKey(); sk.has_value() && !sk->empty()) {
+                    purple_account_set_string(sa.account, "sessionKey", sk->c_str());
+                }
                 purple_debug_info("dummy", "steam_login authenticate pending Steam Guard code\n");
                 purple_connection_update_progress(pc, _("Pending Steam Guard code"), 1, 3);
-//                purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
-//                                               "Steam Guard code required");
-                break;
+
+                sa.steamGuardCode = std::nullopt;
+                while (!sa.cancelToken.is_cancellation_requested()) {
+                    const char *code = purple_account_get_string(sa.account, "steam_guard_code", nullptr);
+                    if (code != nullptr && code[0] != '\0') {
+                        sa.steamGuardCode = std::string{code};
+                        break;
+                    }
+                    co_await sa.ioService.schedule_after(std::chrono::milliseconds(1000));
+                }
+                continue;
+            }
             case SteamClient::AUTH_UNKNOWN_FAILURE:
                 purple_debug_info("dummy", "steam_login authenticate unknown failure\n");
                 purple_connection_error_reason(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
@@ -542,6 +580,18 @@ static void steam_login(PurpleAccount *account) {
     sa.pc = pc;
     sa.username = sa.account->username;
     sa.password = sa.account->password;
+
+    if (const char *code = purple_account_get_string(account, "steam_guard_code", nullptr);
+        code != nullptr && code[0] != '\0') {
+        sa.steamGuardCode = std::string{code};
+    } else {
+        sa.steamGuardCode = std::nullopt;
+    }
+
+    if (const char *key = purple_account_get_string(account, "sessionKey", nullptr);
+        key != nullptr && key[0] != '\0') {
+        sa.client.setSessionKey(std::string{key});
+    }
     sa.poll_callback_id = purple_timeout_add(50, (GSourceFunc) step_io_service, pc);
 
     // sa->hostname_ip_cache = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
@@ -550,11 +600,12 @@ static void steam_login(PurpleAccount *account) {
 //    sa.last_message_timestamp = purple_account_get_int(sa.account, "last_message_timestamp", 0);
     read_last_timestamps(sa);
 
-    if (const char *x = purple_account_get_string(account, "refreshToken", nullptr)) {
-        sa.refreshToken = x;
+    if (const char *x = purple_account_get_string(account, "refreshToken", nullptr);
+        x != nullptr && x[0] != '\0') {
+        sa.refreshToken = std::string{x};
         // steam_login_with_access_token(sa);
     } else {
-        sa.refreshToken = {};
+        sa.refreshToken = std::nullopt;
         // steam_get_rsa_key(sa);
     }
 

@@ -25,7 +25,8 @@ namespace SteamClient {
         void shutdown();
 
         cppcoro::task <AuthResponseState> authenticate(const std::string &username, const std::string &password,
-                                                       const std::optional<std::string> &steamGuardCode);
+                                                       const std::optional<std::string> &steamGuardCode,
+                                                       const std::optional<std::string> &refreshToken = std::nullopt);
 
         cppcoro::task <FriendsList> getFriendsList();
 
@@ -41,9 +42,15 @@ namespace SteamClient {
 
         void resetSessionKey();
 
+        void setSessionKey(const std::string &value);
+
         bool shouldReset();
 
         bool isSessionKeySet();
+
+        std::optional<std::string> getSessionKey();
+
+        std::optional<std::string> getRefreshToken();
     };
 } // SteamClient
 

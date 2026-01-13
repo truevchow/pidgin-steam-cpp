@@ -113,6 +113,7 @@ message(STATUS "Protobuf include dirs: ${Protobuf_INCLUDE_DIRS}")
 add_library(pidgin_steam SHARED
         #        src/steam_rsa.cpp
         src/libdummy.cpp src/libdummy.h
+        src/environ.cpp src/environ.h
         src/coro_utils.h
         src/grpc_client_wrapper.h
 )

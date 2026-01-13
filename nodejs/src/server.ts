@@ -1,4 +1,4 @@
-import {ConnectRouter} from "@connectrpc/connect";
+import {Code, ConnectError, ConnectRouter} from "@connectrpc/connect";
 import {AuthService} from './protobufs/comm_protobufs/auth_connect'
 import {AuthResponse, AuthResponse_AuthState} from './protobufs/comm_protobufs/auth_pb'
 import {MessageService} from './protobufs/comm_protobufs/message_connect'
@@ -74,8 +74,8 @@ class SessionWrapper {
     client: SteamUser;
     steamGuardCallback: undefined | ((code: string) => void);
     resolve: undefined | ((value: AuthResponse) => void);
+    pendingAuthResponse: undefined | AuthResponse;
 
-    expectRefreshToken: boolean;
     refreshToken: undefined | string;
     loggedOnDetails: undefined | any;
 
@@ -84,7 +84,6 @@ class SessionWrapper {
 
     constructor(client: SteamUser, expectRefreshToken: boolean) {
         this.client = client;
-        this.expectRefreshToken = expectRefreshToken;
         this.friendsLoaded = false;
     }
 
@@ -107,34 +106,45 @@ function authRoute(router: ConnectRouter) {
             let isNew: boolean;
 
             function requestSteamGuardCode() {
-                let resolve = wrapper.resolve!;
-                // session.submitSteamGuardCode(steamGuardMachineToken);
-                resolve(new AuthResponse({
+                const res = new AuthResponse({
                     success: true,
                     reasonStr: AuthResponse_AuthState.STEAM_GUARD_CODE_REQUEST.toString(),
                     reason: AuthResponse_AuthState.STEAM_GUARD_CODE_REQUEST,
                     sessionKey: sessionKey,
-                }));
+                });
+                if (wrapper.resolve) {
+                    wrapper.resolve(res);
+                } else {
+                    wrapper.pendingAuthResponse = res;
+                }
             }
 
             function fail(reason: AuthResponse_AuthState = AuthResponse_AuthState.INVALID_CREDENTIALS) {
-                let resolve = wrapper.resolve!;
-                resolve(new AuthResponse({
+                const res = new AuthResponse({
                     success: false,
                     reasonStr: reason.toString(),
                     reason: reason,
-                }));
+                });
+                if (wrapper.resolve) {
+                    wrapper.resolve(res);
+                } else {
+                    wrapper.pendingAuthResponse = res;
+                }
             }
 
             function succeed(refreshToken: string | undefined) {
-                let resolve = wrapper.resolve!;
-                resolve(new AuthResponse({
+                const res = new AuthResponse({
                     success: true,
                     reasonStr: AuthResponse_AuthState.SUCCESS.toString(),
                     reason: AuthResponse_AuthState.SUCCESS,
                     sessionKey: sessionKey,
                     refreshToken: refreshToken,
-                }));
+                });
+                if (wrapper.resolve) {
+                    wrapper.resolve(res);
+                } else {
+                    wrapper.pendingAuthResponse = res;
+                }
             }
 
             // Print all sessions
@@ -167,7 +177,7 @@ function authRoute(router: ConnectRouter) {
                     if (!wrapper.resolve) {
                         return;
                     }
-                    if (wrapper.loggedOnDetails && (!wrapper.expectRefreshToken || wrapper.refreshToken)) {
+                    if (wrapper.loggedOnDetails) {
                         succeed(wrapper.refreshToken);
                     }
                 }
@@ -250,14 +260,38 @@ function authRoute(router: ConnectRouter) {
             console.log("Session key", sessionKey);
             return new Promise<AuthResponse>(async (resolve) => {
                 wrapper.resolve = resolve;
+                if (wrapper.pendingAuthResponse) {
+                    const res = wrapper.pendingAuthResponse;
+                    wrapper.pendingAuthResponse = undefined;
+                    resolve(res);
+                    return;
+                }
                 // https://github.com/DoctorMcKay/node-steam-session/blob/master/examples/login-with-password.ts
                 if (isNew) {
+                    return;
+                }
+
+                if (wrapper.loggedOnDetails) {
+                    succeed(wrapper.refreshToken);
+                    return;
+                }
+
+                if (!call.steamGuardCode) {
+                    if (wrapper.steamGuardCallback) {
+                        requestSteamGuardCode();
+                        return;
+                    }
+                    fail(AuthResponse_AuthState.STEAM_GUARD_CODE_REQUEST);
                     return;
                 }
 
                 if (call.steamGuardCode) {
                     console.log("Using provided Steam Guard code:", call.steamGuardCode)
                     try {
+                        if (!wrapper.steamGuardCallback) {
+                            fail(AuthResponse_AuthState.STEAM_GUARD_CODE_REQUEST);
+                            return;
+                        }
                         let callback = wrapper.steamGuardCallback!;
                         wrapper.steamGuardCallback = undefined;
                         callback!(call.steamGuardCode!);
@@ -287,6 +321,9 @@ function messageRoute(router: ConnectRouter) {
                 });
             }
             let client = wrapper.client;
+            if (!client.steamID) {
+                throw new ConnectError("Not logged on", Code.FailedPrecondition);
+            }
             let steamId = new SteamID(call.targetId!);
             let message = call.message!;
 
@@ -318,6 +355,9 @@ function messageRoute(router: ConnectRouter) {
                 return;
             }
             let client = wrapper.client;
+            if (!client.steamID) {
+                throw new ConnectError("Not logged on", Code.FailedPrecondition);
+            }
             console.log("Streaming messages for", client.steamID?.getSteamID64());
 
             var messages: ResponseMessage[] = [];
@@ -347,9 +387,12 @@ function messageRoute(router: ConnectRouter) {
             let wrapper = activeSessions.get(sessionKey);
             if (!wrapper) {
                 console.log("Invalid session key", sessionKey);
-                throw new Error("Invalid session key");
+                throw new ConnectError("Invalid session key", Code.Unauthenticated);
             }
             let client = wrapper.client;
+            if (!client.steamID) {
+                throw new ConnectError("Not logged on", Code.FailedPrecondition);
+            }
 
             console.debug("Start polling active sessions");
             let {sessions, timestamp} = await client.chat.getActiveFriendMessageSessions(
@@ -373,9 +416,12 @@ function messageRoute(router: ConnectRouter) {
             let sessionKey = call.sessionKey!;
             let wrapper = activeSessions.get(sessionKey);
             if (!wrapper) {
-                throw new Error("Invalid session key");
+                throw new ConnectError("Invalid session key", Code.Unauthenticated);
             }
             let client = wrapper.client;
+            if (!client.steamID) {
+                throw new ConnectError("Not logged on", Code.FailedPrecondition);
+            }
             let steamId = new SteamID(call.targetId!);
             client.chat.ackFriendMessage(steamId, call.lastTimestamp!.toDate());
         },
@@ -388,6 +434,9 @@ function messageRoute(router: ConnectRouter) {
                 return;
             }
             let client = wrapper.client;
+            if (!client.steamID) {
+                throw new ConnectError("Not logged on", Code.FailedPrecondition);
+            }
             let steamId = new SteamID(call.targetId!);
 
             console.log("Polling messages for", steamId)
@@ -430,13 +479,18 @@ function messageRoute(router: ConnectRouter) {
             let sessionKey = call.sessionKey!;
             let wrapper = activeSessions.get(sessionKey);
             if (!wrapper) {
-                throw new Error("Invalid session key");
+                throw new ConnectError("Invalid session key", Code.Unauthenticated);
+            }
+
+            let client = wrapper.client;
+            if (!client.steamID) {
+                throw new ConnectError("Not logged on", Code.FailedPrecondition);
             }
 
             async function checkFriendsLoaded(startTime, timeout) {
                 while (!wrapper!.friendsLoaded) {
                     if (Date.now() - startTime > timeout) {
-                        throw new Error("Timed out waiting for friends list");
+                        throw new ConnectError("Timed out waiting for friends list", Code.DeadlineExceeded);
                     }
                     await new Promise(resolve => setTimeout(resolve, 100));
                 }
@@ -444,18 +498,15 @@ function messageRoute(router: ConnectRouter) {
 
             await checkFriendsLoaded(Date.now(), 5000);
 
-            let client = wrapper.client;
-
             function makePersona(steamId: string, relationship: SteamUser.EFriendRelationship) {
                 let friend = wrapper!.getUser(steamId);
                 if (!friend) {
-                    throw new Error("Invalid steamId");
+                    throw new ConnectError("Persona not available", Code.FailedPrecondition);
                 }
                 var personaState = friend.persona_state;
                 if (personaState === undefined || personaState === null) {
                     personaState = SteamUser.EPersonaState.Offline;
                 }
-                let isOnline = personaState !== SteamUser.EPersonaState.Offline;
                 return new Persona({
                     id: steamId,
                     name: friend.player_name,
