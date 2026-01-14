@@ -580,7 +580,10 @@ async function main() {
     });
 
     // Cleanup function to terminate all SteamUser clients
-    const cleanup = async () => {
+    let shuttingDown = false;
+    const cleanup = () => {
+        if (shuttingDown) return;
+        shuttingDown = true;
         console.log("Cleaning up");
         for (const [sessionKey, sessionWrapper] of activeSessions) {
             try {
@@ -594,8 +597,29 @@ async function main() {
     };
 
     // Register cleanup function on program termination
-    process.on('beforeExit', async () => {
-        await cleanup();
+    const shutdown = async (reason: string, exitCode: number) => {
+        console.log(`Shutting down (${reason})`);
+        try {
+            cleanup();
+        } finally {
+            try {
+                await server.close();
+            } catch (ex) {
+                console.log("Error while closing server", ex);
+            }
+        }
+        process.exit(exitCode);
+    };
+
+    process.on("exit", () => {
+        cleanup();
+    });
+
+    process.once("SIGINT", () => {
+        void shutdown("SIGINT", 0);
+    });
+    process.once("SIGTERM", () => {
+        void shutdown("SIGTERM", 0);
     });
 }
 
