@@ -81,6 +81,7 @@ class SessionWrapper {
 
     friendsLoaded: boolean;
     users: Record<string, SteamClientUser> = {};  // needed since client.users doesn't contain all fields even after `user`` event
+    personaMissingLog: Record<string, number> = {};
 
     constructor(client: SteamUser, expectRefreshToken: boolean) {
         this.client = client;
@@ -499,22 +500,29 @@ function messageRoute(router: ConnectRouter) {
             await checkFriendsLoaded(Date.now(), 5000);
 
             function makePersona(steamId: string, relationship: SteamUser.EFriendRelationship) {
-                let friend = wrapper!.getUser(steamId);
+                const friend: any = wrapper!.getUser(steamId) || ((client.users as any)?.[steamId]);
+                const isSelf = steamId === client.steamID?.getSteamID64();
                 if (!friend) {
-                    throw new ConnectError("Persona not available", Code.FailedPrecondition);
+                    const now = Date.now();
+                    const last = wrapper!.personaMissingLog[steamId] || 0;
+                    if (!isSelf && (now - last) > 60_000) {
+                        wrapper!.personaMissingLog[steamId] = now;
+                        console.log("Persona not available for friend", steamId, "(using placeholder persona)");
+                    }
                 }
-                var personaState = friend.persona_state;
+
+                let personaState = friend?.persona_state;
                 if (personaState === undefined || personaState === null) {
                     personaState = SteamUser.EPersonaState.Offline;
                 }
                 return new Persona({
                     id: steamId,
-                    name: friend.player_name,
+                    name: (friend?.player_name || steamId),
                     personaState: (personaState as unknown) as PersonaState,
                     avatarUrl: {
-                        icon: friend.avatar_url_icon,
-                        medium: friend.avatar_url_medium,
-                        full: friend.avatar_url_full,
+                        icon: (friend?.avatar_url_icon || ""),
+                        medium: (friend?.avatar_url_medium || ""),
+                        full: (friend?.avatar_url_full || ""),
                     },
                     // lastLogoff: Timestamp.fromDate(friend.last_logoff),
                     // lastLogon: Timestamp.fromDate(friend.last_logon),
@@ -524,15 +532,9 @@ function messageRoute(router: ConnectRouter) {
 
             return new FriendsListResponse({
                 user: makePersona(client.steamID!.getSteamID64(), SteamUser.EFriendRelationship.RequestInitiator),
-                friends: Object.entries(client.myFriends).map(([steamId, relationship]) => {
-                    try {
-                        return makePersona(steamId, relationship);
-                    } catch (ex) {
-                        console.log("Error while getting friend", typeof ex);
-                        console.error(ex);
-                        return undefined;
-                    }
-                }).filter((persona) => persona !== undefined && persona.id != client.steamID?.getSteamID64()) as Persona[],
+                friends: Object.entries(client.myFriends)
+                    .map(([steamId, relationship]) => makePersona(steamId, relationship))
+                    .filter((persona) => persona.id != client.steamID?.getSteamID64()) as Persona[],
             });
         }
     });
