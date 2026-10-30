@@ -134,6 +134,9 @@ SteamBuddy* getSteamBuddy(SteamAccount &sa, std::string id) {
 void update_buddy_info(SteamAccount &sa, const SteamClient::Buddy &friendInfo) {
     purple_debug_info("dummy", "receive_messages %s update buddy %s %s\n", sa.account->username, friendInfo.id.c_str(),
                       friendInfo.nickname.c_str());
+    if (sa.closing.load() || sa.pc == nullptr) {
+        return;
+    }
     if (!purple_find_buddy(sa.account, friendInfo.id.c_str())) {
         add_buddy(sa, friendInfo);
     }
@@ -264,9 +267,8 @@ cppcoro::task<void> receive_messages(SteamAccount &sa) {
     co_return;
 }
 
-gboolean step_io_service(PurpleConnection *pc) {
-    // purple_debug_info("dummy", "step_io_service start %p\n", pc);
-    auto *saPtr = static_cast<SteamAccount *>(pc->proto_data);
+gboolean step_io_service(gpointer data) {
+    auto *saPtr = static_cast<SteamAccount *>(data);
     if (saPtr == nullptr) {
         return G_SOURCE_REMOVE;
     }
@@ -275,8 +277,11 @@ gboolean step_io_service(PurpleConnection *pc) {
     sa.ioService.process_pending_events();
 
     if (sa.closing.load() && sa.shutdownComplete.load()) {
+        if (sa.pc != nullptr) {
+            sa.pc->proto_data = nullptr;
+            sa.pc = nullptr;
+        }
         sa.ioService.stop();
-        pc->proto_data = nullptr;
         delete saPtr;
         purple_debug_info("dummy", "steam_close done\n");
         return G_SOURCE_REMOVE;
@@ -330,7 +335,13 @@ cppcoro::task<int> send_message(
 static gint steam_send_im(PurpleConnection *pc, const gchar *who, const gchar *msg,
                           PurpleMessageFlags flags) {
     purple_debug_info("dummy", "steam_send_im start\n");
+    if (pc->proto_data == nullptr) {
+        return -1;
+    }
     SteamAccount &sa = *static_cast<SteamAccount *>(pc->proto_data);
+    if (sa.closing.load()) {
+        return -1;
+    }
     sa.scope.spawn(send_message(pc, sa, std::string{who}, std::string{msg}));
     return 1;
 }
@@ -592,7 +603,7 @@ static void steam_login(PurpleAccount *account) {
         key != nullptr && key[0] != '\0') {
         sa.client.setSessionKey(std::string{key});
     }
-    sa.poll_callback_id = purple_timeout_add(50, (GSourceFunc) step_io_service, pc);
+    sa.poll_callback_id = purple_timeout_add(50, (GSourceFunc) step_io_service, p_sa);
 
     // sa->hostname_ip_cache = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
     // sa->sent_messages_hash = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, nullptr);
